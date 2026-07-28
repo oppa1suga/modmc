@@ -9,7 +9,7 @@
 // CẤP KEY MỚI: thêm 1 dòng mới.
 // THU HỒI: xóa dòng đó đi (hoặc đặt ngày quá khứ).
 const KEYS = {
-  "MINERUA-2026-ABCD": { user: "test1",  expires: "2026-07-27" },
+  "MINERUA-2026-ABCD": { user: "test1",  expires: "2030-07-27" },
   "MINERUA-VIP-9F3K7": { user: "test2",  expires: "2026-08-15" },
   // "KEY-CUA-KHACH":    { user: "tên",   expires: "2026-09-01" },
 };
