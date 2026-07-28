@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quản lý Key - Minerua</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 20px auto;
+         padding: 0 16px; background: #1a1a1a; color: #eee; }
+  h1 { color: #7cc; }
+  input, button { padding: 8px; margin: 4px 0; border-radius: 6px; border: 1px solid #444;
+                  background: #2a2a2a; color: #eee; font-size: 14px; }
+  button { cursor: pointer; background: #2a6; border: none; }
+  button:hover { background: #3b7; }
+  button.danger { background: #a33; }
+  button.danger:hover { background: #c44; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { border: 1px solid #444; padding: 8px; text-align: left; font-size: 14px; }
+  th { background: #333; }
+  .box { background: #222; padding: 16px; border-radius: 8px; margin: 12px 0; }
+  .expired { color: #f66; }
+  .ok { color: #6f6; }
+  #loginBox { text-align: center; margin-top: 60px; }
+</style>
+</head>
+<body>
+
+<h1>Quản lý Key Minerua</h1>
+
+<!-- Màn hình đăng nhập -->
+<div id="loginBox" class="box">
+  <p>Nhập mật khẩu admin để tiếp tục</p>
+  <input type="password" id="pass" placeholder="Mật khẩu admin" style="width:250px">
+  <br>
+  <button onclick="login()">Đăng nhập</button>
+  <p id="loginErr" style="color:#f66"></p>
+</div>
+
+<!-- Màn hình quản lý (ẩn ban đầu) -->
+<div id="mainBox" style="display:none">
+
+  <div class="box">
+    <h3>Thêm / Gia hạn key</h3>
+    <input id="newKey" placeholder="Key (vd MINERUA-ABC-123)" style="width:250px"><br>
+    <input id="newUser" placeholder="Tên khách" style="width:250px"><br>
+    <input id="newExpire" type="date" style="width:250px"><br>
+    <button onclick="addKey()">Lưu key</button>
+  </div>
+
+  <div class="box">
+    <h3>Danh sách key</h3>
+    <button onclick="loadKeys()">Tải lại</button>
+    <table id="keyTable">
+      <thead><tr><th>Key</th><th>Khách</th><th>Hết hạn</th><th>Còn lại</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+let adminPass = "";
+
+function login() {
+  adminPass = document.getElementById("pass").value;
+  // Thử gọi list để kiểm tra mật khẩu
+  fetch("/api/admin?action=list", { headers: { "x-admin-password": adminPass } })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        document.getElementById("loginBox").style.display = "none";
+        document.getElementById("mainBox").style.display = "block";
+        renderKeys(data.keys);
+      } else {
+        document.getElementById("loginErr").textContent = data.error || "Sai mật khẩu";
+      }
+    })
+    .catch(e => document.getElementById("loginErr").textContent = "Lỗi kết nối");
+}
+
+function loadKeys() {
+  fetch("/api/admin?action=list", { headers: { "x-admin-password": adminPass } })
+    .then(r => r.json())
+    .then(data => { if (data.ok) renderKeys(data.keys); });
+}
+
+function renderKeys(keys) {
+  const tbody = document.querySelector("#keyTable tbody");
+  tbody.innerHTML = "";
+  const now = new Date();
+  keys.forEach(k => {
+    const exp = new Date(k.expires);
+    const daysLeft = Math.floor((exp - now) / 86400000);
+    const expired = daysLeft < 0;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>" + k.key + "</td>" +
+      "<td>" + k.user + "</td>" +
+      "<td>" + k.expires + "</td>" +
+      "<td class='" + (expired ? "expired" : "ok") + "'>" +
+        (expired ? "Hết hạn" : daysLeft + " ngày") + "</td>" +
+      "<td><button class='danger' onclick=\"delKey('" + k.key + "')\">Xóa</button></td>";
+    tbody.appendChild(tr);
+  });
+}
+
+function addKey() {
+  const key = document.getElementById("newKey").value.trim();
+  const user = document.getElementById("newUser").value.trim();
+  const expire = document.getElementById("newExpire").value;
+  if (!key || !expire) { alert("Nhập key và ngày hết hạn"); return; }
+
+  const url = "/api/admin?action=add&key=" + encodeURIComponent(key)
+            + "&user=" + encodeURIComponent(user)
+            + "&expires=" + encodeURIComponent(expire);
+  fetch(url, { headers: { "x-admin-password": adminPass } })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        document.getElementById("newKey").value = "";
+        document.getElementById("newUser").value = "";
+        document.getElementById("newExpire").value = "";
+        loadKeys();
+      } else alert(data.error);
+    });
+}
+
+function delKey(key) {
+  if (!confirm("Xóa key " + key + "?")) return;
+  fetch("/api/admin?action=delete&key=" + encodeURIComponent(key),
+        { headers: { "x-admin-password": adminPass } })
+    .then(r => r.json())
+    .then(data => { if (data.ok) loadKeys(); else alert(data.error); });
+}
+</script>
+
+</body>
+</html>
