@@ -5,135 +5,223 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Quản lý Key - Minerua</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 20px auto;
-         padding: 0 16px; background: #1a1a1a; color: #eee; }
-  h1 { color: #7cc; }
-  input, button { padding: 8px; margin: 4px 0; border-radius: 6px; border: 1px solid #444;
-                  background: #2a2a2a; color: #eee; font-size: 14px; }
-  button { cursor: pointer; background: #2a6; border: none; }
-  button:hover { background: #3b7; }
-  button.danger { background: #a33; }
-  button.danger:hover { background: #c44; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th, td { border: 1px solid #444; padding: 8px; text-align: left; font-size: 14px; }
-  th { background: #333; }
-  .box { background: #222; padding: 16px; border-radius: 8px; margin: 12px 0; }
-  .expired { color: #f66; }
-  .ok { color: #6f6; }
-  #loginBox { text-align: center; margin-top: 60px; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
+         background: #0f1420; color: #e6e9ef; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 20px 16px; }
+  h1 { color: #5ad; margin: 0 0 4px; font-size: 24px; }
+  .sub { color: #8892a6; font-size: 13px; margin-bottom: 20px; }
+  input, button, select { padding: 10px; border-radius: 8px; border: 1px solid #2a3550;
+    background: #1a2234; color: #e6e9ef; font-size: 14px; }
+  input:focus { outline: none; border-color: #5ad; }
+  button { cursor: pointer; border: none; font-weight: 600; transition: .15s; }
+  .btn-primary { background: #2a7; color: #fff; }
+  .btn-primary:hover { background: #3b8; }
+  .btn-small { padding: 6px 10px; font-size: 12px; }
+  .btn-blue { background: #37a; color: #fff; }
+  .btn-blue:hover { background: #48b; }
+  .btn-danger { background: #a34; color: #fff; }
+  .btn-danger:hover { background: #b45; }
+  .btn-gray { background: #334; color: #ccd; }
+  .btn-gray:hover { background: #445; }
+  .card { background: #151d2e; padding: 18px; border-radius: 12px; margin: 14px 0;
+    border: 1px solid #212c44; }
+  .card h3 { margin: 0 0 12px; color: #9ab; font-size: 15px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row input { flex: 1; min-width: 140px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border-bottom: 1px solid #212c44; padding: 10px 8px; text-align: left; font-size: 13px; }
+  th { color: #7a86a0; font-weight: 600; }
+  tr:hover td { background: #1a2234; }
+  .badge { padding: 3px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .b-ok { background: #1a4d2e; color: #6f6; }
+  .b-warn { background: #4d3d1a; color: #fd6; }
+  .b-exp { background: #4d1a1a; color: #f88; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .stat { background: #151d2e; border: 1px solid #212c44; border-radius: 10px;
+    padding: 12px 18px; flex: 1; min-width: 100px; text-align: center; }
+  .stat .num { font-size: 24px; font-weight: 700; color: #5ad; }
+  .stat .lbl { font-size: 11px; color: #8892a6; margin-top: 2px; }
+  .keycell { font-family: monospace; font-size: 12px; }
+  #loginBox { max-width: 360px; margin: 80px auto; text-align: center; }
+  .err { color: #f77; font-size: 13px; margin-top: 8px; }
+  .copy { cursor: pointer; color: #6ac; margin-left: 6px; font-size: 11px; }
+  .search { margin-bottom: 10px; }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<h1>Quản lý Key Minerua</h1>
+  <h1>⚡ Quản lý Key Minerua</h1>
+  <div class="sub">Hệ thống cấp phép mod</div>
 
-<!-- Màn hình đăng nhập -->
-<div id="loginBox" class="box">
-  <p>Nhập mật khẩu admin để tiếp tục</p>
-  <input type="password" id="pass" placeholder="Mật khẩu admin" style="width:250px">
-  <br>
-  <button onclick="login()">Đăng nhập</button>
-  <p id="loginErr" style="color:#f66"></p>
-</div>
-
-<!-- Màn hình quản lý (ẩn ban đầu) -->
-<div id="mainBox" style="display:none">
-
-  <div class="box">
-    <h3>Thêm / Gia hạn key</h3>
-    <input id="newKey" placeholder="Key (vd MINERUA-ABC-123)" style="width:250px"><br>
-    <input id="newUser" placeholder="Tên khách" style="width:250px"><br>
-    <input id="newExpire" type="date" style="width:250px"><br>
-    <button onclick="addKey()">Lưu key</button>
+  <!-- Đăng nhập -->
+  <div id="loginBox" class="card">
+    <h3>Đăng nhập admin</h3>
+    <div class="row">
+      <input type="password" id="pass" placeholder="Mật khẩu admin" style="flex:1"
+             onkeydown="if(event.key==='Enter')login()">
+      <button class="btn-gray btn-small" onclick="togglePass()">👁</button>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-top:10px" onclick="login()">Đăng nhập</button>
+    <div id="loginErr" class="err"></div>
   </div>
 
-  <div class="box">
-    <h3>Danh sách key</h3>
-    <button onclick="loadKeys()">Tải lại</button>
-    <table id="keyTable">
-      <thead><tr><th>Key</th><th>Khách</th><th>Hết hạn</th><th>Còn lại</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
+  <!-- Quản lý -->
+  <div id="mainBox" style="display:none">
 
+    <div class="stats">
+      <div class="stat"><div class="num" id="stTotal">0</div><div class="lbl">Tổng key</div></div>
+      <div class="stat"><div class="num" id="stActive">0</div><div class="lbl">Còn hạn</div></div>
+      <div class="stat"><div class="num" id="stSoon">0</div><div class="lbl">Sắp hết (&lt;3 ngày)</div></div>
+      <div class="stat"><div class="num" id="stExp">0</div><div class="lbl">Hết hạn</div></div>
+    </div>
+
+    <div class="card">
+      <h3>Thêm key mới</h3>
+      <div class="row">
+        <input id="newKey" placeholder="Key (vd MINERUA-ABC-123)">
+        <input id="newUser" placeholder="Tên khách">
+        <input id="newExpire" type="date">
+        <button class="btn-primary" onclick="addKey()">Thêm</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Danh sách key</h3>
+      <input class="search" id="search" placeholder="🔍 Tìm theo key hoặc tên khách..."
+             style="width:100%" oninput="renderKeys()">
+      <button class="btn-gray btn-small" onclick="loadKeys()">↻ Tải lại</button>
+      <table>
+        <thead><tr><th>Key</th><th>Khách</th><th>Hết hạn</th><th>Còn lại</th><th>Gia hạn</th><th></th></tr></thead>
+        <tbody id="keyBody"></tbody>
+      </table>
+    </div>
+
+  </div>
 </div>
 
 <script>
 let adminPass = "";
+let allKeys = [];
+
+function togglePass() {
+  const p = document.getElementById("pass");
+  p.type = p.type === "password" ? "text" : "password";
+}
+
+function api(action, params = {}) {
+  let url = "/api/admin?action=" + action;
+  for (const k in params) url += "&" + k + "=" + encodeURIComponent(params[k]);
+  return fetch(url, { headers: { "x-admin-password": adminPass } }).then(r => r.json());
+}
 
 function login() {
   adminPass = document.getElementById("pass").value;
-  // Thử gọi list để kiểm tra mật khẩu
-  fetch("/api/admin?action=list", { headers: { "x-admin-password": adminPass } })
-    .then(r => r.json())
-    .then(data => {
-      if (data.ok) {
-        document.getElementById("loginBox").style.display = "none";
-        document.getElementById("mainBox").style.display = "block";
-        renderKeys(data.keys);
-      } else {
-        document.getElementById("loginErr").textContent = data.error || "Sai mật khẩu";
-      }
-    })
-    .catch(e => document.getElementById("loginErr").textContent = "Lỗi kết nối");
+  api("list").then(data => {
+    if (data.ok) {
+      document.getElementById("loginBox").style.display = "none";
+      document.getElementById("mainBox").style.display = "block";
+      sessionStorage.setItem("adminPass", adminPass);
+      allKeys = data.keys;
+      renderKeys();
+    } else {
+      document.getElementById("loginErr").textContent = data.error || "Sai mật khẩu";
+    }
+  }).catch(() => document.getElementById("loginErr").textContent = "Lỗi kết nối");
 }
 
 function loadKeys() {
-  fetch("/api/admin?action=list", { headers: { "x-admin-password": adminPass } })
-    .then(r => r.json())
-    .then(data => { if (data.ok) renderKeys(data.keys); });
+  api("list").then(data => { if (data.ok) { allKeys = data.keys; renderKeys(); } });
 }
 
-function renderKeys(keys) {
-  const tbody = document.querySelector("#keyTable tbody");
-  tbody.innerHTML = "";
-  const now = new Date();
-  keys.forEach(k => {
-    const exp = new Date(k.expires);
-    const daysLeft = Math.floor((exp - now) / 86400000);
-    const expired = daysLeft < 0;
+function daysLeft(expires) {
+  return Math.floor((new Date(expires) - new Date()) / 86400000);
+}
+
+function renderKeys() {
+  const q = document.getElementById("search").value.toLowerCase();
+  const body = document.getElementById("keyBody");
+  body.innerHTML = "";
+  let total = 0, active = 0, soon = 0, exp = 0;
+
+  allKeys.forEach(k => {
+    total++;
+    const d = daysLeft(k.expires);
+    if (d < 0) exp++;
+    else if (d < 3) { soon++; active++; }
+    else active++;
+
+    // Lọc tìm kiếm
+    if (q && !(k.key.toLowerCase().includes(q) || (k.user||"").toLowerCase().includes(q))) return;
+
+    let badge;
+    if (d < 0) badge = "<span class='badge b-exp'>Hết hạn</span>";
+    else if (d < 3) badge = "<span class='badge b-warn'>" + d + " ngày</span>";
+    else badge = "<span class='badge b-ok'>" + d + " ngày</span>";
+
     const tr = document.createElement("tr");
     tr.innerHTML =
-      "<td>" + k.key + "</td>" +
-      "<td>" + k.user + "</td>" +
+      "<td class='keycell'>" + k.key + "<span class='copy' onclick=\"cp('" + k.key + "')\">copy</span></td>" +
+      "<td>" + (k.user||"") + "</td>" +
       "<td>" + k.expires + "</td>" +
-      "<td class='" + (expired ? "expired" : "ok") + "'>" +
-        (expired ? "Hết hạn" : daysLeft + " ngày") + "</td>" +
-      "<td><button class='danger' onclick=\"delKey('" + k.key + "')\">Xóa</button></td>";
-    tbody.appendChild(tr);
+      "<td>" + badge + "</td>" +
+      "<td>" +
+        "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',7)\">+7</button> " +
+        "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',30)\">+30</button>" +
+      "</td>" +
+      "<td><button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button></td>";
+    body.appendChild(tr);
   });
+
+  document.getElementById("stTotal").textContent = total;
+  document.getElementById("stActive").textContent = active;
+  document.getElementById("stSoon").textContent = soon;
+  document.getElementById("stExp").textContent = exp;
 }
 
 function addKey() {
   const key = document.getElementById("newKey").value.trim();
   const user = document.getElementById("newUser").value.trim();
-  const expire = document.getElementById("newExpire").value;
-  if (!key || !expire) { alert("Nhập key và ngày hết hạn"); return; }
+  const expires = document.getElementById("newExpire").value;
+  if (!key || !expires) { alert("Nhập key và ngày hết hạn"); return; }
+  api("add", { key, user, expires }).then(data => {
+    if (data.ok) {
+      document.getElementById("newKey").value = "";
+      document.getElementById("newUser").value = "";
+      document.getElementById("newExpire").value = "";
+      loadKeys();
+    } else alert(data.error);
+  });
+}
 
-  const url = "/api/admin?action=add&key=" + encodeURIComponent(key)
-            + "&user=" + encodeURIComponent(user)
-            + "&expires=" + encodeURIComponent(expire);
-  fetch(url, { headers: { "x-admin-password": adminPass } })
-    .then(r => r.json())
-    .then(data => {
-      if (data.ok) {
-        document.getElementById("newKey").value = "";
-        document.getElementById("newUser").value = "";
-        document.getElementById("newExpire").value = "";
-        loadKeys();
-      } else alert(data.error);
-    });
+function renew(key, days) {
+  api("renew", { key, days }).then(data => {
+    if (data.ok) loadKeys();
+    else alert(data.error);
+  });
 }
 
 function delKey(key) {
   if (!confirm("Xóa key " + key + "?")) return;
-  fetch("/api/admin?action=delete&key=" + encodeURIComponent(key),
-        { headers: { "x-admin-password": adminPass } })
-    .then(r => r.json())
-    .then(data => { if (data.ok) loadKeys(); else alert(data.error); });
+  api("delete", { key }).then(data => { if (data.ok) loadKeys(); else alert(data.error); });
 }
-</script>
 
+function cp(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    // báo nhẹ
+  });
+}
+
+// Tự đăng nhập lại nếu còn phiên
+window.onload = function() {
+  const saved = sessionStorage.getItem("adminPass");
+  if (saved) {
+    adminPass = saved;
+    document.getElementById("pass").value = saved;
+    login();
+  }
+};
+</script>
 </body>
 </html>
- 
