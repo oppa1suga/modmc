@@ -1,0 +1,6 @@
+{
+  "name": "server-minerua",
+  "version": "1.0.0",
+  "description": "Server API cho mod minerua",
+  "private": true
+}
