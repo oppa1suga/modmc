@@ -1,31 +1,58 @@
 // api/check.js
-// Endpoint kiểm tra key bản quyền.
+// Kiểm tra key bản quyền CÓ THỜI HẠN (cho thuê mod).
 // Mod gọi:  https://server-minerua.vercel.app/api/check?key=XXXX
-// Server trả về key có hợp lệ không.
+// Server trả về: key còn hạn không + còn bao nhiêu thời gian.
 
-// === DANH SÁCH KEY HỢP LỆ ===
-// Bạn tự đặt các key ở đây. Muốn cấp cho ai thì thêm key vào danh sách,
-// muốn thu hồi thì xóa đi. Mỗi key là một chuỗi bất kỳ (nên đặt khó đoán).
-const VALID_KEYS = [
-  "MINERUA-2026-ABCD",   // key mẫu 1
-  "MINERUA-VIP-9F3K7",   // key mẫu 2
-  // thêm key mới ở đây, mỗi dòng một key trong dấu ngoặc kép + dấu phẩy
-];
+// === DANH SÁCH KEY ===
+// Mỗi key gắn với 1 ngày hết hạn (định dạng "YYYY-MM-DD" hoặc "YYYY-MM-DDTHH:mm").
+// GIA HẠN: chỉ cần sửa ngày expires của key đó rồi commit.
+// CẤP KEY MỚI: thêm 1 dòng mới.
+// THU HỒI: xóa dòng đó đi (hoặc đặt ngày quá khứ).
+const KEYS = {
+  "MINERUA-2026-ABCD": { user: "test1",  expires: "2026-12-31" },
+  "MINERUA-VIP-9F3K7": { user: "test2",  expires: "2026-08-15" },
+  // "KEY-CUA-KHACH":    { user: "tên",   expires: "2026-09-01" },
+};
 
 export default function handler(req, res) {
-  // Lấy key từ đường dẫn: ?key=XXXX
   const key = req.query.key;
 
-  // Không gửi key
   if (!key) {
     return res.status(400).json({ valid: false, reason: "Thiếu key" });
   }
 
-  // Kiểm tra key có trong danh sách hợp lệ không
-  const valid = VALID_KEYS.includes(key);
+  const info = KEYS[key];
+  if (!info) {
+    return res.status(200).json({ valid: false, reason: "Key không tồn tại" });
+  }
+
+  // Tính thời gian còn lại
+  const now = new Date();
+  const expireDate = new Date(info.expires);
+  const msLeft = expireDate.getTime() - now.getTime();
+
+  if (msLeft <= 0) {
+    return res.status(200).json({
+      valid: false,
+      reason: "Key đã hết hạn",
+      user: info.user,
+      expires: info.expires,
+      secondsLeft: 0
+    });
+  }
+
+  // Còn hạn -> trả về thời gian còn lại
+  const secondsLeft = Math.floor(msLeft / 1000);
+  const daysLeft = Math.floor(secondsLeft / 86400);
+  const hoursLeft = Math.floor((secondsLeft % 86400) / 3600);
 
   return res.status(200).json({
-    valid: valid,
-    reason: valid ? "Key hợp lệ" : "Key không hợp lệ"
+    valid: true,
+    reason: "Key còn hạn",
+    user: info.user,
+    expires: info.expires,
+    secondsLeft: secondsLeft,
+    daysLeft: daysLeft,
+    hoursLeft: hoursLeft
   });
 }
