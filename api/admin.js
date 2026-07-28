@@ -56,6 +56,29 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, message: "Đã lưu key " + key });
     }
 
+    // === GIA HẠN key (cộng thêm N ngày) ===
+    if (action === "renew") {
+      const key = req.query.key;
+      const days = parseInt(req.query.days, 10);
+      if (!key || !days) {
+        return res.status(400).json({ ok: false, error: "Thiếu key hoặc days" });
+      }
+      let info = await redis.get("license:" + key);
+      if (!info) return res.status(404).json({ ok: false, error: "Key không tồn tại" });
+      if (typeof info === "string") { try { info = JSON.parse(info); } catch (e) {} }
+
+      // Cộng dồn: nếu còn hạn thì cộng từ hạn cũ, nếu hết hạn thì cộng từ hôm nay
+      const now = new Date();
+      let base = new Date(info.expires);
+      if (isNaN(base.getTime()) || base < now) base = now;
+      base.setDate(base.getDate() + days);
+      const newExpire = base.toISOString().slice(0, 10); // YYYY-MM-DD
+
+      info.expires = newExpire;
+      await redis.set("license:" + key, JSON.stringify(info));
+      return res.status(200).json({ ok: true, message: "Đã gia hạn", expires: newExpire });
+    }
+
     // === XÓA key ===
     if (action === "delete") {
       const key = req.query.key;
