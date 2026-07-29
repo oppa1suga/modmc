@@ -121,6 +121,13 @@ export default async function handler(req, res) {
       });
     }
 
+    // === XÓA CONFIG đã lưu (tài khoản/mật khẩu) ===
+    if (action === "deleteconfig") {
+      const configKey = req.query.ns === "vangioi" ? "vangioi_config:main" : "config:main";
+      await redis.del(configKey);
+      return res.status(200).json({ ok: true, message: "Đã xóa config" });
+    }
+
     // === XEM key chủ hiện tại (dùng chung cho cả 2 mod) ===
     if (action === "getownerkey") {
       const ownerKey = await redis.get("owner_key");

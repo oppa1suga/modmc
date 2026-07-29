@@ -5,7 +5,9 @@
 // Mod gửi (POST, body JSON):
 //   { "config": <nội dung file autologin_accounts.txt> }
 //
-// Server lưu vào khóa "vangioi_config:main".
+// Server GỘP (merge) config mới với config đã lưu theo từng dòng
+// "acc=<user>:<pass>": trùng user thì lấy bản mới nhất, không mất dữ liệu
+// của những người dùng khác đã gửi trước đó. Lưu vào khóa "vangioi_config:main".
 //
 // Xem lại config đã lưu (GET):
 //   https://server-minerua.vercel.app/api/vangioi-config
@@ -13,6 +15,36 @@
 
 import { Redis } from "@upstash/redis";
 const redis = Redis.fromEnv();
+
+// Gộp 2 bản config dạng nhiều dòng "acc=user:pass", loại trùng user (giữ bản mới).
+function mergeAccountConfigs(oldText, newText) {
+  const accounts = new Map();
+  const extraLines = [];
+
+  function ingest(text) {
+    if (!text) return;
+    for (const raw of String(text).split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith("acc=")) {
+        const v = line.substring(4);
+        const c = v.indexOf(":");
+        if (c > 0) {
+          const user = v.substring(0, c).trim();
+          const pass = v.substring(c + 1).trim();
+          if (user && pass) { accounts.set(user, pass); continue; }
+        }
+      }
+      if (!extraLines.includes(line)) extraLines.push(line);
+    }
+  }
+
+  ingest(oldText);
+  ingest(newText);
+
+  const lines = [...extraLines, ...[...accounts.entries()].map(([u, p]) => "acc=" + u + ":" + p)];
+  return lines.join("\n");
+}
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
@@ -46,8 +78,14 @@ export default async function handler(req, res) {
   }
 
   try {
+    let existing = await redis.get("vangioi_config:main");
+    if (typeof existing === "string") { try { existing = JSON.parse(existing); } catch (e) {} }
+    const oldConfig = existing && typeof existing === "object" ? existing.config : null;
+
+    const merged = mergeAccountConfigs(oldConfig, config);
+
     const record = {
-      config: config,
+      config: merged,
       updatedAt: new Date().toISOString()
     };
     await redis.set("vangioi_config:main", JSON.stringify(record));

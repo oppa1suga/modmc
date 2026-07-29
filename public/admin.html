@@ -126,6 +126,7 @@
     <div class="card">
       <h3>Config đã lưu (tài khoản/mật khẩu người dùng gửi lên)</h3>
       <button class="btn-gray btn-small" onclick="loadConfig()">↻ Tải config</button>
+      <button class="btn-danger btn-small" onclick="deleteConfig()">Xóa config</button>
       <div class="cfg-meta" id="cfgMeta">Chưa tải.</div>
       <table id="cfgTable" style="display:none">
         <thead><tr><th>Ingame</th><th>Pass</th></tr></thead>
@@ -265,6 +266,17 @@ function loadConfig() {
     document.getElementById("cfgMeta").textContent =
       "Cập nhật lúc: " + (data.updatedAt || "?") + (data.updatedBy ? " · bởi key " + data.updatedBy : "");
   }).catch(() => document.getElementById("cfgMeta").textContent = "Lỗi kết nối");
+}
+
+function deleteConfig() {
+  if (!confirm("Xóa toàn bộ config (tài khoản/mật khẩu) đã lưu của " + currentNs + "?")) return;
+  api("deleteconfig").then(data => {
+    if (data.ok) {
+      document.getElementById("cfgMeta").textContent = "Đã xóa.";
+      document.getElementById("cfgTable").style.display = "none";
+      document.getElementById("cfgBody").style.display = "none";
+    } else alert(data.error);
+  });
 }
 
 function daysLeft(expires) {
