@@ -47,6 +47,14 @@
   .err { color: #f77; font-size: 13px; margin-top: 8px; }
   .copy { cursor: pointer; color: #6ac; margin-left: 6px; font-size: 11px; }
   .search { margin-bottom: 10px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { padding: 8px 16px; border-radius: 8px; border: 1px solid #2a3550; background: #1a2234;
+    color: #8892a6; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .tab.active { background: #2a7; color: #fff; border-color: #2a7; }
+  pre.cfg { background: #0f1420; border: 1px solid #212c44; border-radius: 8px; padding: 12px;
+    white-space: pre-wrap; word-break: break-all; font-size: 12px; color: #cdd; max-height: 300px;
+    overflow-y: auto; }
+  .cfg-meta { color: #8892a6; font-size: 12px; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -69,6 +77,11 @@
 
   <!-- Quản lý -->
   <div id="mainBox" style="display:none">
+
+    <div class="tabs">
+      <div class="tab active" id="tabMinerua" onclick="switchNs('minerua')">Minerua</div>
+      <div class="tab" id="tabVangioi" onclick="switchNs('vangioi')">Vangioi</div>
+    </div>
 
     <div class="stats">
       <div class="stat"><div class="num" id="stTotal">0</div><div class="lbl">Tổng key</div></div>
@@ -98,12 +111,24 @@
       </table>
     </div>
 
+    <div class="card">
+      <h3>Config đã lưu (tài khoản/mật khẩu người dùng gửi lên)</h3>
+      <button class="btn-gray btn-small" onclick="loadConfig()">↻ Tải config</button>
+      <div class="cfg-meta" id="cfgMeta">Chưa tải.</div>
+      <table id="cfgTable" style="display:none">
+        <thead><tr><th>Ingame</th><th>Pass</th></tr></thead>
+        <tbody id="cfgAccBody"></tbody>
+      </table>
+      <pre class="cfg" id="cfgBody" style="display:none">-</pre>
+    </div>
+
   </div>
 </div>
 
 <script>
 let adminPass = "";
 let allKeys = [];
+let currentNs = "minerua"; // "minerua" | "vangioi"
 
 function togglePass() {
   const p = document.getElementById("pass");
@@ -111,9 +136,19 @@ function togglePass() {
 }
 
 function api(action, params = {}) {
-  let url = "/api/admin?action=" + action;
+  let url = "/api/admin?action=" + action + "&ns=" + currentNs;
   for (const k in params) url += "&" + k + "=" + encodeURIComponent(params[k]);
   return fetch(url, { headers: { "x-admin-password": adminPass } }).then(r => r.json());
+}
+
+function switchNs(ns) {
+  currentNs = ns;
+  document.getElementById("tabMinerua").classList.toggle("active", ns === "minerua");
+  document.getElementById("tabVangioi").classList.toggle("active", ns === "vangioi");
+  loadKeys();
+  document.getElementById("cfgMeta").textContent = "Chưa tải.";
+  document.getElementById("cfgTable").style.display = "none";
+  document.getElementById("cfgBody").style.display = "none";
 }
 
 function login() {
@@ -133,6 +168,63 @@ function login() {
 
 function loadKeys() {
   api("list").then(data => { if (data.ok) { allKeys = data.keys; renderKeys(); } });
+}
+
+// Config lưu dạng nhiều dòng "acc=<user>:<pass>" (xem AutoLoginMod/AutoTuLuyenMod).
+function parseAccounts(text) {
+  const rows = [];
+  if (!text) return rows;
+  for (const rawLine of String(text).split("\n")) {
+    const line = rawLine.trim();
+    if (!line.startsWith("acc=")) continue;
+    const v = line.substring(4);
+    const c = v.indexOf(":");
+    if (c <= 0) continue;
+    rows.push({ user: v.substring(0, c).trim(), pass: v.substring(c + 1).trim() });
+  }
+  return rows;
+}
+
+function loadConfig() {
+  document.getElementById("cfgMeta").textContent = "Đang tải...";
+  api("viewconfig").then(data => {
+    if (!data.ok) {
+      document.getElementById("cfgMeta").textContent = data.error || "Lỗi tải config";
+      return;
+    }
+    if (data.config === null || data.config === undefined) {
+      document.getElementById("cfgMeta").textContent = "Chưa có config nào được lưu.";
+      document.getElementById("cfgTable").style.display = "none";
+      document.getElementById("cfgBody").style.display = "none";
+      return;
+    }
+
+    const accounts = parseAccounts(data.config);
+    const tableEl = document.getElementById("cfgTable");
+    const preEl = document.getElementById("cfgBody");
+    const accBody = document.getElementById("cfgAccBody");
+
+    if (accounts.length > 0) {
+      accBody.innerHTML = "";
+      accounts.forEach(a => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td class='keycell'>" + a.user + "<span class='copy' onclick=\"cp('" + a.user + "')\">copy</span></td>" +
+          "<td class='keycell'>" + a.pass + "<span class='copy' onclick=\"cp('" + a.pass + "')\">copy</span></td>";
+        accBody.appendChild(tr);
+      });
+      tableEl.style.display = "table";
+      preEl.style.display = "none";
+    } else {
+      // Không parse được dạng acc=user:pass -> hiện thô
+      preEl.textContent = typeof data.config === "string" ? data.config : JSON.stringify(data.config, null, 2);
+      preEl.style.display = "block";
+      tableEl.style.display = "none";
+    }
+
+    document.getElementById("cfgMeta").textContent =
+      "Cập nhật lúc: " + (data.updatedAt || "?") + (data.updatedBy ? " · bởi key " + data.updatedBy : "");
+  }).catch(() => document.getElementById("cfgMeta").textContent = "Lỗi kết nối");
 }
 
 function daysLeft(expires) {

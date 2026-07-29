@@ -7,9 +7,11 @@
 //   ?action=add&key=XXX&user=tên&expires=ngày -> thêm/sửa key
 //   ?action=delete&key=XXX                    -> xóa key
 //   ?action=get&key=XXX                       -> xem 1 key
+//   ?action=viewconfig                        -> xem config (tài khoản/mật khẩu) đã lưu
 //
-// Thêm ?ns=vangioi vào bất kỳ request nào ở trên để quản lý key của mod
-// vangioi (namespace "vangioi_license:") thay vì mặc định "license:" (minerua).
+// Thêm ?ns=vangioi vào bất kỳ request nào ở trên để quản lý key/config của mod
+// vangioi (namespace "vangioi_license:"/"vangioi_config:") thay vì mặc định
+// "license:"/"config:" (minerua).
 
 import { Redis } from "@upstash/redis";
 
@@ -100,6 +102,22 @@ export default async function handler(req, res) {
         try { info = JSON.parse(info); } catch (e) {}
       }
       return res.status(200).json({ ok: true, key, info: info || null });
+    }
+
+    // === XEM CONFIG (tài khoản/mật khẩu) đã lưu ===
+    if (action === "viewconfig") {
+      const configKey = req.query.ns === "vangioi" ? "vangioi_config:main" : "config:main";
+      let record = await redis.get(configKey);
+      if (!record) {
+        return res.status(200).json({ ok: true, config: null, updatedAt: null });
+      }
+      if (typeof record === "string") { try { record = JSON.parse(record); } catch (e) {} }
+      return res.status(200).json({
+        ok: true,
+        config: record.config,
+        updatedAt: record.updatedAt,
+        updatedBy: record.updatedBy || null
+      });
     }
 
     return res.status(400).json({ ok: false, error: "action không hợp lệ" });
