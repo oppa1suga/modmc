@@ -14,6 +14,7 @@
 // "license:"/"config:" (minerua).
 
 import { Redis } from "@upstash/redis";
+import { randomBytes } from "crypto";
 
 const redis = Redis.fromEnv();
 
@@ -118,6 +119,30 @@ export default async function handler(req, res) {
         updatedAt: record.updatedAt,
         updatedBy: record.updatedBy || null
       });
+    }
+
+    // === XEM key chủ hiện tại (dùng chung cho cả 2 mod) ===
+    if (action === "getownerkey") {
+      const ownerKey = await redis.get("owner_key");
+      return res.status(200).json({ ok: true, ownerKey: ownerKey || null });
+    }
+
+    // === TẠO / ĐỔI key chủ ===
+    // ?action=setownerkey            -> tự sinh ngẫu nhiên
+    // ?action=setownerkey&key=XXXX   -> đặt key tùy chọn
+    if (action === "setownerkey") {
+      let ownerKey = req.query.key;
+      if (!ownerKey) {
+        ownerKey = "OWNER-" + randomBytes(16).toString("hex").toUpperCase();
+      }
+      await redis.set("owner_key", ownerKey);
+      return res.status(200).json({ ok: true, ownerKey });
+    }
+
+    // === XÓA key chủ ===
+    if (action === "deleteownerkey") {
+      await redis.del("owner_key");
+      return res.status(200).json({ ok: true, message: "Đã xóa key chủ" });
     }
 
     return res.status(400).json({ ok: false, error: "action không hợp lệ" });

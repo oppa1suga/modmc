@@ -16,6 +16,11 @@ const redis = Redis.fromEnv();
 
 async function checkLicense(key) {
   if (!key) return { ok: false, status: 400, error: "Thiếu key" };
+
+  // Key chủ -> luôn hợp lệ, bỏ qua Redis license
+  const ownerKey = await redis.get("owner_key").catch(() => null);
+  if (ownerKey && key === ownerKey) return { ok: true };
+
   let info;
   try {
     info = await redis.get("license:" + key);

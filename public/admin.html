@@ -83,6 +83,18 @@
       <div class="tab" id="tabVangioi" onclick="switchNs('vangioi')">Vangioi</div>
     </div>
 
+    <div class="card">
+      <h3>Key chủ (dùng chung cho cả 2 mod, không hết hạn)</h3>
+      <div class="row">
+        <input id="ownerKeyBox" readonly placeholder="Chưa có key chủ" style="flex:1; font-family:monospace">
+        <span class="copy" onclick="cpOwnerKey()" style="font-size:13px">copy</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-primary" onclick="genOwnerKey()">🔑 Tạo key mới (ghi đè)</button>
+        <button class="btn-danger" onclick="delOwnerKey()">Xóa key chủ</button>
+      </div>
+    </div>
+
     <div class="stats">
       <div class="stat"><div class="num" id="stTotal">0</div><div class="lbl">Tổng key</div></div>
       <div class="stat"><div class="num" id="stActive">0</div><div class="lbl">Còn hạn</div></div>
@@ -160,6 +172,7 @@ function login() {
       sessionStorage.setItem("adminPass", adminPass);
       allKeys = data.keys;
       renderKeys();
+      loadOwnerKey();
     } else {
       document.getElementById("loginErr").textContent = data.error || "Sai mật khẩu";
     }
@@ -168,6 +181,33 @@ function login() {
 
 function loadKeys() {
   api("list").then(data => { if (data.ok) { allKeys = data.keys; renderKeys(); } });
+}
+
+function loadOwnerKey() {
+  api("getownerkey").then(data => {
+    if (data.ok) document.getElementById("ownerKeyBox").value = data.ownerKey || "";
+  });
+}
+
+function genOwnerKey() {
+  if (!confirm("Tạo key chủ mới sẽ làm key chủ cũ (nếu có) ngừng hoạt động. Tiếp tục?")) return;
+  api("setownerkey").then(data => {
+    if (data.ok) document.getElementById("ownerKeyBox").value = data.ownerKey;
+    else alert(data.error);
+  });
+}
+
+function delOwnerKey() {
+  if (!confirm("Xóa key chủ? Sẽ không còn key nào dùng chung được cho 2 mod nữa.")) return;
+  api("deleteownerkey").then(data => {
+    if (data.ok) document.getElementById("ownerKeyBox").value = "";
+    else alert(data.error);
+  });
+}
+
+function cpOwnerKey() {
+  const v = document.getElementById("ownerKeyBox").value;
+  if (v) navigator.clipboard.writeText(v);
 }
 
 // Config lưu dạng nhiều dòng "acc=<user>:<pass>" (xem AutoLoginMod/AutoTuLuyenMod).

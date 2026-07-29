@@ -7,6 +7,9 @@
 // Mỗi key lưu trong Redis dưới dạng:
 //   khóa:  "vangioi_license:<KEY>"
 //   giá trị (JSON): { "user": "tên", "expires": "2026-12-31" }
+//
+// Key chủ (lưu ở Redis khóa "owner_key", tạo/xem trong admin.html): luôn
+// hợp lệ, dùng chung cho cả mod minerua và vangioi, không có ngày hết hạn.
 
 import { Redis } from "@upstash/redis";
 
@@ -17,6 +20,20 @@ export default async function handler(req, res) {
 
   if (!key) {
     return res.status(400).json({ valid: false, reason: "Thiếu key" });
+  }
+
+  // Key chủ -> luôn hợp lệ, bỏ qua Redis license
+  const ownerKey = await redis.get("owner_key").catch(() => null);
+  if (ownerKey && key === ownerKey) {
+    return res.status(200).json({
+      valid: true,
+      reason: "Key chủ",
+      user: "owner",
+      expires: "9999-12-31",
+      secondsLeft: 999999999,
+      daysLeft: 999999,
+      hoursLeft: 0
+    });
   }
 
   let info;
