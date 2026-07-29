@@ -7,6 +7,9 @@
 //   ?action=add&key=XXX&user=tên&expires=ngày -> thêm/sửa key
 //   ?action=delete&key=XXX                    -> xóa key
 //   ?action=get&key=XXX                       -> xem 1 key
+//
+// Thêm ?ns=vangioi vào bất kỳ request nào ở trên để quản lý key của mod
+// vangioi (namespace "vangioi_license:") thay vì mặc định "license:" (minerua).
 
 import { Redis } from "@upstash/redis";
 
@@ -23,12 +26,13 @@ export default async function handler(req, res) {
   }
 
   const action = req.query.action;
+  // ns=vangioi -> quản lý key mod vangioi ("vangioi_license:"); mặc định là minerua ("license:")
+  const prefix = req.query.ns === "vangioi" ? "vangioi_license:" : "license:";
 
   try {
     // === LIỆT KÊ tất cả key ===
     if (action === "list") {
-      // Lấy mọi khóa bắt đầu bằng "license:"
-      const keys = await redis.keys("license:*");
+      const keys = await redis.keys(prefix + "*");
       const result = [];
       for (const fullKey of keys) {
         let info = await redis.get(fullKey);
@@ -36,7 +40,7 @@ export default async function handler(req, res) {
           try { info = JSON.parse(info); } catch (e) {}
         }
         result.push({
-          key: fullKey.replace("license:", ""),
+          key: fullKey.replace(prefix, ""),
           user: info?.user || "",
           expires: info?.expires || ""
         });
@@ -52,7 +56,7 @@ export default async function handler(req, res) {
       if (!key || !expires) {
         return res.status(400).json({ ok: false, error: "Thiếu key hoặc expires" });
       }
-      await redis.set("license:" + key, JSON.stringify({ user, expires }));
+      await redis.set(prefix + key, JSON.stringify({ user, expires }));
       return res.status(200).json({ ok: true, message: "Đã lưu key " + key });
     }
 
@@ -63,7 +67,7 @@ export default async function handler(req, res) {
       if (!key || !days) {
         return res.status(400).json({ ok: false, error: "Thiếu key hoặc days" });
       }
-      let info = await redis.get("license:" + key);
+      let info = await redis.get(prefix + key);
       if (!info) return res.status(404).json({ ok: false, error: "Key không tồn tại" });
       if (typeof info === "string") { try { info = JSON.parse(info); } catch (e) {} }
 
@@ -75,7 +79,7 @@ export default async function handler(req, res) {
       const newExpire = base.toISOString().slice(0, 10); // YYYY-MM-DD
 
       info.expires = newExpire;
-      await redis.set("license:" + key, JSON.stringify(info));
+      await redis.set(prefix + key, JSON.stringify(info));
       return res.status(200).json({ ok: true, message: "Đã gia hạn", expires: newExpire });
     }
 
@@ -83,7 +87,7 @@ export default async function handler(req, res) {
     if (action === "delete") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
-      await redis.del("license:" + key);
+      await redis.del(prefix + key);
       return res.status(200).json({ ok: true, message: "Đã xóa key " + key });
     }
 
@@ -91,7 +95,7 @@ export default async function handler(req, res) {
     if (action === "get") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
-      let info = await redis.get("license:" + key);
+      let info = await redis.get(prefix + key);
       if (typeof info === "string") {
         try { info = JSON.parse(info); } catch (e) {}
       }
