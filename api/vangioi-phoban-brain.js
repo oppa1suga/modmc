@@ -123,23 +123,48 @@ export default async function handler(req, res) {
   const guiOpen = !!body.guiOpen;
   const screenOpen = !!body.screenOpen;
 
-  // === team_mem: phản ứng đơn giản, không cần theo dõi tọa độ/lệnh ===
-  // Chờ GUI "Are you sure?" (do ai đó mời vào đội) mở ra -> sau CLICK_DELAY_MS -> bấm xác nhận.
+  // === team_mem: chờ GUI mời vào đội -> bấm xác nhận -> nếu server nhảy
+  // thêm GUI 2 SAU KHI đã đổi dimension (đã thực sự bị kéo vào phó bản theo
+  // leader) thì ESC đóng nó. Giống hệt cơ chế của team_leader.
   if (mode === "team_mem") {
     let action = "NONE", msg = null, clickSlot = null;
+    if (!s.memPhase) s.memPhase = "WATCHING";
 
-    if (!guiOpen) {
-      s.memGuiSeenAt = null;
-    } else {
-      if (!s.memGuiSeenAt) s.memGuiSeenAt = now;
-      if (!s.memClicked && now - s.memGuiSeenAt >= CLICK_DELAY_MS) {
-        action = "CLICK_CONFIRM";
-        clickSlot = CONFIRM_SLOT;
-        msg = "Đã xác nhận vào đội.";
-        s.memClicked = true;
+    if (s.memPhase === "WATCHING") {
+      if (!guiOpen) {
+        s.memGuiSeenAt = null;
+      } else {
+        if (!s.memGuiSeenAt) s.memGuiSeenAt = now;
+        if (now - s.memGuiSeenAt >= CLICK_DELAY_MS) {
+          action = "CLICK_CONFIRM";
+          clickSlot = CONFIRM_SLOT;
+          msg = "Đã xác nhận vào đội.";
+          s.memHomeDim = dim; // dimension lúc bấm, để phát hiện GUI 2 sau khi bị kéo vào phó bản
+          s.memPhaseStart = now;
+          s.memEscMsgSent = false;
+          s.memPhase = "WAIT_GUI_CLOSE";
+        }
+      }
+    } else if (s.memPhase === "WAIT_GUI_CLOSE") {
+      if (!screenOpen) {
+        s.memPhase = "WATCHING";
+        s.memGuiSeenAt = null;
+      } else {
+        const dimChanged = s.memHomeDim && dim && dim !== s.memHomeDim;
+        const elapsed = now - s.memPhaseStart;
+        // Chỉ ESC khi ĐÃ đổi dimension (đã bị kéo vào phó bản) - tránh lỡ
+        // tay đóng GUI hợp lệ khác trong lúc còn ở sảnh.
+        if (dimChanged && elapsed >= SECOND_GUI_GRACE_MS) {
+          action = "ESC_CLOSE";
+          if (!s.memEscMsgSent) { msg = "Có thêm GUI 2, đang ESC đóng..."; s.memEscMsgSent = true; }
+        }
+        if (elapsed > GUI_CLOSE_TIMEOUT_MS) {
+          // Bỏ cuộc, quay về theo dõi lời mời kế tiếp
+          s.memPhase = "WATCHING";
+          s.memGuiSeenAt = null;
+        }
       }
     }
-    if (!guiOpen) s.memClicked = false;
 
     await redis.set(sessionKey, JSON.stringify(s), { ex: SESSION_TTL_SEC }).catch(() => {});
     return res.status(200).json({ action, command: null, clickSlot, msg });
