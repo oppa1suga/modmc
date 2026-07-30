@@ -118,7 +118,7 @@
              style="width:100%" oninput="renderKeys()">
       <button class="btn-gray btn-small" onclick="loadKeys()">↻ Tải lại</button>
       <table>
-        <thead><tr><th>Key</th><th>Khách</th><th>Hết hạn</th><th>Còn lại</th><th>Gia hạn</th><th></th></tr></thead>
+        <thead><tr><th>Key</th><th>Khách</th><th>Hết hạn</th><th>Còn lại</th><th>Đang dùng (IP)</th><th>Gia hạn</th><th></th></tr></thead>
         <tbody id="keyBody"></tbody>
       </table>
     </div>
@@ -304,17 +304,29 @@ function renderKeys() {
     else if (d < 3) badge = "<span class='badge b-warn'>" + d + " ngày</span>";
     else badge = "<span class='badge b-ok'>" + d + " ngày</span>";
 
+    let usingCell = "-";
+    if (currentNs === "vangioi" && k.lockActive) {
+      usingCell = "<span class='badge b-ok'>" + (k.lockIgName || "?") + "</span> "
+        + "<span class='keycell'>" + (k.lockIp || "") + "</span>";
+    }
+
     const tr = document.createElement("tr");
     tr.innerHTML =
       "<td class='keycell'>" + k.key + "<span class='copy' onclick=\"cp('" + k.key + "')\">copy</span></td>" +
       "<td>" + (k.user||"") + "</td>" +
       "<td>" + k.expires + "</td>" +
       "<td>" + badge + "</td>" +
+      "<td>" + usingCell + "</td>" +
       "<td>" +
         "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',7)\">+7</button> " +
         "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',30)\">+30</button>" +
       "</td>" +
-      "<td><button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button></td>";
+      "<td>" +
+        (currentNs === "vangioi"
+          ? "<button class='btn-gray btn-small' onclick=\"releaseIpLock('" + k.key + "')\">Gỡ IP</button> "
+          : "") +
+        "<button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button>" +
+      "</td>";
     body.appendChild(tr);
   });
 
@@ -349,6 +361,11 @@ function renew(key, days) {
 function delKey(key) {
   if (!confirm("Xóa key " + key + "?")) return;
   api("delete", { key }).then(data => { if (data.ok) loadKeys(); else alert(data.error); });
+}
+
+function releaseIpLock(key) {
+  if (!confirm("Gỡ khóa IP cho key " + key + "? IP/máy khác sẽ dùng được ngay.")) return;
+  api("releaseiplock", { key }).then(data => { if (data.ok) loadKeys(); else alert(data.error); });
 }
 
 function cp(text) {

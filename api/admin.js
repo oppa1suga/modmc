@@ -8,6 +8,7 @@
 //   ?action=delete&key=XXX                    -> xóa key
 //   ?action=get&key=XXX                       -> xem 1 key
 //   ?action=viewconfig                        -> xem config (tài khoản/mật khẩu) đã lưu
+//   ?action=releaseiplock&key=XXX&ns=vangioi  -> gỡ khóa IP cho key (mod vangioi)
 //
 // Thêm ?ns=vangioi vào bất kỳ request nào ở trên để quản lý key/config của mod
 // vangioi (namespace "vangioi_license:"/"vangioi_config:") thay vì mặc định
@@ -42,11 +43,26 @@ export default async function handler(req, res) {
         if (typeof info === "string") {
           try { info = JSON.parse(info); } catch (e) {}
         }
-        result.push({
-          key: fullKey.replace(prefix, ""),
+        const keyOnly = fullKey.replace(prefix, "");
+        const entry = {
+          key: keyOnly,
           user: info?.user || "",
           expires: info?.expires || ""
-        });
+        };
+
+        // Kèm thông tin khóa IP hiện tại (chỉ có ý nghĩa với key vangioi)
+        if (req.query.ns === "vangioi") {
+          let lock = await redis.get("vangioi_iplock:" + keyOnly);
+          if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
+          if (lock) {
+            const active = (Date.now() - (lock.lastSeen || 0)) <= 3 * 60 * 1000;
+            entry.lockIp = lock.ip || "";
+            entry.lockIgName = lock.igName || "";
+            entry.lockActive = active;
+          }
+        }
+
+        result.push(entry);
       }
       return res.status(200).json({ ok: true, keys: result });
     }
@@ -103,6 +119,14 @@ export default async function handler(req, res) {
         try { info = JSON.parse(info); } catch (e) {}
       }
       return res.status(200).json({ ok: true, key, info: info || null });
+    }
+
+    // === GỠ KHÓA IP (chỉ áp dụng cho key vangioi, ?ns=vangioi) ===
+    if (action === "releaseiplock") {
+      const key = req.query.key;
+      if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
+      await redis.del("vangioi_iplock:" + key);
+      return res.status(200).json({ ok: true, message: "Đã gỡ khóa IP cho key " + key });
     }
 
     // === XEM CONFIG (tài khoản/mật khẩu) đã lưu ===
