@@ -76,7 +76,9 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const key = body.key;
-  const mode = body.mode === "team_leader" ? "team_leader" : "solo";
+  const mode = body.mode === "team_leader" ? "team_leader"
+             : body.mode === "team_mem" ? "team_mem"
+             : "solo";
   const sessionKey = "vangioi_phoban_session:" + key + ":" + mode;
 
   if (!key) return res.status(400).json({ action: "NONE" });
@@ -120,6 +122,28 @@ export default async function handler(req, res) {
   const dim = typeof body.dim === "string" ? body.dim : "";
   const guiOpen = !!body.guiOpen;
   const screenOpen = !!body.screenOpen;
+
+  // === team_mem: phản ứng đơn giản, không cần theo dõi tọa độ/lệnh ===
+  // Chờ GUI "Are you sure?" (do ai đó mời vào đội) mở ra -> sau CLICK_DELAY_MS -> bấm xác nhận.
+  if (mode === "team_mem") {
+    let action = "NONE", msg = null, clickSlot = null;
+
+    if (!guiOpen) {
+      s.memGuiSeenAt = null;
+    } else {
+      if (!s.memGuiSeenAt) s.memGuiSeenAt = now;
+      if (!s.memClicked && now - s.memGuiSeenAt >= CLICK_DELAY_MS) {
+        action = "CLICK_CONFIRM";
+        clickSlot = CONFIRM_SLOT;
+        msg = "Đã xác nhận vào đội.";
+        s.memClicked = true;
+      }
+    }
+    if (!guiOpen) s.memClicked = false;
+
+    await redis.set(sessionKey, JSON.stringify(s), { ex: SESSION_TTL_SEC }).catch(() => {});
+    return res.status(200).json({ action, command: null, clickSlot, msg });
+  }
 
   function isFarFromHome(threshold) {
     if (!s.homePos) return true;
