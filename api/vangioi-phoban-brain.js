@@ -1,0 +1,254 @@
+// api/vangioi-phoban-brain.js
+// Bộ não quyết định của AutoPhoBanSoloMod + AutoPhoBanTeamMod (Leader) - chạy
+// TRÊN SERVER (giấu logic khỏi client, chống crack), giống DotPhaBrain bên minerua.
+//
+// Client gửi trạng thái quan sát được mỗi ~250ms (POST):
+//   {
+//     "key": "<KEY bản quyền>",
+//     "mode": "solo" | "team_leader",
+//     "active": true/false,          // false -> server dọn session, không làm gì thêm
+//     "guiOpen": true/false,         // màn hình hiện tại có phải GUI "Are you sure?" không
+//     "screenOpen": true/false,      // có bất kỳ màn hình nào đang mở không
+//     "pos": {"x":.., "y":.., "z":..},
+//     "dim": "minecraft:overworld"   // id dimension hiện tại
+//   }
+//
+// Server trả về hành động cần làm (client chỉ thực thi, không biết vì sao):
+//   { "action": "NONE"|"SEND_COMMAND"|"CLICK_CONFIRM"|"ESC_CLOSE",
+//     "command": "...", "clickSlot": 4, "msg": "..." }
+//
+// Tên lệnh phó bản, ngưỡng thời gian, máy trạng thái... đều nằm ở đây,
+// KHÔNG có trong client -> crack lấy được mod cũng không biết logic thật.
+
+import { Redis } from "@upstash/redis";
+const redis = Redis.fromEnv();
+
+// ===== Bí mật (chỉ có trên server) =====
+const COMMANDS = [
+  "ada join ɴɢụᴄᴛʜầɴ",
+  "ada join ɴɢụᴄᴛʜầɴ_2",
+  "ada join ɴɢụᴄᴛʜầɴ_3"
+];
+const CONFIRM_SLOT = 4;
+
+const AFTER_DONE_DELAY_MS = 3000;
+const POS_GRACE_MS = 1000;
+const POS_ENTER_THRESHOLD = 10.0;
+const POS_RETURN_THRESHOLD = 5.0;
+const ENTER_TIMEOUT_MS = 10000;
+const WAIT_GUI_TIMEOUT_MS = 5000;
+const GUI_CLOSE_TIMEOUT_MS = 5000;
+const SECOND_GUI_GRACE_MS = 500; // chỉ dùng cho mode team_leader (ESC GUI 2)
+const CLICK_DELAY_MS = 500;
+const REJECT_CD_MS = 10000;
+const NOGUI_CD_MS = 30000;
+
+const SESSION_TTL_SEC = 3600;
+
+function dist(a, b) {
+  const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+async function checkLicense(key) {
+  if (!key) return { ok: false, error: "Thiếu key" };
+  const ownerKey = await redis.get("owner_key").catch(() => null);
+  if (ownerKey && key === ownerKey) return { ok: true };
+
+  let info;
+  try {
+    info = await redis.get("vangioi_license:" + key);
+  } catch (e) {
+    return { ok: false, error: "Lỗi database" };
+  }
+  if (!info) return { ok: false, error: "Key không hợp lệ" };
+  if (typeof info === "string") { try { info = JSON.parse(info); } catch (e) {} }
+  if (new Date(info.expires).getTime() <= Date.now()) {
+    return { ok: false, error: "Key đã hết hạn" };
+  }
+  return { ok: true };
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ action: "NONE" });
+  }
+
+  const body = req.body || {};
+  const key = body.key;
+  const mode = body.mode === "team_leader" ? "team_leader" : "solo";
+  const sessionKey = "vangioi_phoban_session:" + key + ":" + mode;
+
+  if (!key) return res.status(400).json({ action: "NONE" });
+
+  // Tắt -> dọn session luôn, không cần kiểm tra bản quyền
+  if (body.active === false) {
+    await redis.del(sessionKey).catch(() => {});
+    return res.status(200).json({ action: "NONE" });
+  }
+
+  const lic = await checkLicense(key);
+  if (!lic.ok) return res.status(200).json({ action: "NONE", msg: lic.error });
+
+  let s;
+  try {
+    s = await redis.get(sessionKey);
+  } catch (e) {
+    return res.status(200).json({ action: "NONE" });
+  }
+  if (typeof s === "string") { try { s = JSON.parse(s); } catch (e) { s = null; } }
+
+  const now = Date.now();
+  if (!s) {
+    s = {
+      phase: "IDLE",
+      runningCmd: -1,
+      readyAt: [0, 0, 0],
+      nextIndex: 0,
+      homePos: null,
+      homeDim: null,
+      dungeonDim: null,
+      phaseStart: now,
+      guiSeenAt: null,
+      posGraceStart: now,
+      escMsgSent: false
+    };
+  }
+
+  const pos = body.pos && typeof body.pos.x === "number"
+      ? body.pos : { x: 0, y: 0, z: 0 };
+  const dim = typeof body.dim === "string" ? body.dim : "";
+  const guiOpen = !!body.guiOpen;
+  const screenOpen = !!body.screenOpen;
+
+  function isFarFromHome(threshold) {
+    if (!s.homePos) return true;
+    if (s.homeDim && dim && dim !== s.homeDim) return true;
+    return dist(pos, s.homePos) >= threshold;
+  }
+
+  let action = "NONE", command = null, msg = null, clickSlot = null;
+
+  switch (s.phase) {
+    case "IDLE": {
+      let pick = -1;
+      for (let k = 0; k < COMMANDS.length; k++) {
+        const i = (s.nextIndex + k) % COMMANDS.length;
+        if (s.readyAt[i] <= now) { pick = i; break; }
+      }
+      if (pick >= 0) {
+        s.homePos = pos;
+        s.homeDim = dim;
+        s.nextIndex = (pick + 1) % COMMANDS.length;
+        s.runningCmd = pick;
+        s.phase = "WAIT_CONFIRM_GUI";
+        s.phaseStart = now;
+        s.guiSeenAt = null;
+        action = "SEND_COMMAND";
+        command = COMMANDS[pick];
+        msg = "Vào phó bản " + (pick + 1) + "...";
+      }
+      break;
+    }
+
+    case "WAIT_CONFIRM_GUI": {
+      if (guiOpen) {
+        if (!s.guiSeenAt) s.guiSeenAt = now;
+        if (now - s.guiSeenAt >= CLICK_DELAY_MS) {
+          action = "CLICK_CONFIRM";
+          clickSlot = CONFIRM_SLOT;
+          msg = "Đã xác nhận vào phó bản " + (s.runningCmd + 1) + ".";
+          s.phase = "WAIT_GUI_CLOSE";
+          s.phaseStart = now;
+          s.escMsgSent = false;
+        }
+      } else {
+        s.guiSeenAt = null;
+        if (now - s.phaseStart > WAIT_GUI_TIMEOUT_MS) {
+          if (s.runningCmd >= 0) s.readyAt[s.runningCmd] = now + NOGUI_CD_MS;
+          msg = "Không thấy GUI xác nhận, chuyển lệnh kế.";
+          s.runningCmd = -1;
+          s.phase = "WAIT_AFTER_DONE";
+          s.phaseStart = now;
+        }
+      }
+      break;
+    }
+
+    case "WAIT_GUI_CLOSE": {
+      if (!screenOpen) {
+        s.phase = "WAIT_ENTER";
+        s.phaseStart = now;
+        s.posGraceStart = now;
+        break;
+      }
+      const dimChanged = s.homeDim && dim && dim !== s.homeDim;
+      const elapsed = now - s.phaseStart;
+      // Chỉ ESC khi ĐÃ sang dimension khác (đã thực sự vào phó bản) -
+      // tránh lỡ tay đóng GUI hợp lệ khác trong lúc còn ở sảnh.
+      if (mode === "team_leader" && dimChanged && elapsed >= SECOND_GUI_GRACE_MS) {
+        action = "ESC_CLOSE";
+        if (!s.escMsgSent) { msg = "Có thêm GUI 2, đang ESC đóng..."; s.escMsgSent = true; }
+      }
+      if (elapsed > GUI_CLOSE_TIMEOUT_MS) {
+        if (s.runningCmd >= 0) s.readyAt[s.runningCmd] = now + REJECT_CD_MS;
+        msg = "GUI không đóng sau 5s (có thể bị từ chối), thử lệnh khác.";
+        s.runningCmd = -1;
+        s.phase = "WAIT_AFTER_DONE";
+        s.phaseStart = now;
+      }
+      break;
+    }
+
+    case "WAIT_ENTER": {
+      if (now - s.posGraceStart < POS_GRACE_MS) break;
+      const dimChanged = s.homeDim && dim && dim !== s.homeDim;
+      if (dimChanged || isFarFromHome(POS_ENTER_THRESHOLD)) {
+        s.dungeonDim = dim;
+        msg = "Đã vào phó bản " + (s.runningCmd + 1) + ", đang chờ hoàn thành...";
+        s.phase = "WAIT_RETURN";
+        s.phaseStart = now;
+        break;
+      }
+      if (now - s.phaseStart > ENTER_TIMEOUT_MS) {
+        if (s.runningCmd >= 0) s.readyAt[s.runningCmd] = now + REJECT_CD_MS;
+        msg = "Không đổi dimension, chưa vào được, thử lệnh khác.";
+        s.runningCmd = -1;
+        s.phase = "WAIT_AFTER_DONE";
+        s.phaseStart = now;
+      }
+      break;
+    }
+
+    case "WAIT_RETURN": {
+      const leftDungeonDim = s.dungeonDim && dim && dim !== s.dungeonDim;
+      const backNearHome = !isFarFromHome(POS_RETURN_THRESHOLD);
+      if (leftDungeonDim || backNearHome) {
+        s.homePos = null;
+        s.homeDim = null;
+        s.dungeonDim = null;
+        msg = "Hoàn thành phó bản " + (s.runningCmd + 1) + ", chuyển lệnh kế...";
+        s.runningCmd = -1;
+        s.phase = "WAIT_AFTER_DONE";
+        s.phaseStart = now;
+      }
+      break;
+    }
+
+    case "WAIT_AFTER_DONE": {
+      if (now - s.phaseStart >= AFTER_DONE_DELAY_MS) {
+        s.phase = "IDLE";
+        s.phaseStart = now;
+      }
+      break;
+    }
+
+    default:
+      s.phase = "IDLE";
+      s.phaseStart = now;
+  }
+
+  await redis.set(sessionKey, JSON.stringify(s), { ex: SESSION_TTL_SEC }).catch(() => {});
+
+  return res.status(200).json({ action, command, clickSlot, msg });
+}
