@@ -16,6 +16,10 @@
 // endpoint này mỗi 10 phút (xem LicenseManager) để "gia hạn" quyền dùng IP đó.
 // Nếu quá LEASE_TIMEOUT_MS không thấy IP cũ gọi lại (game đã tắt) thì IP
 // khác dùng key đó sẽ tự chiếm được, không cần thao tác gì thêm.
+//
+// TỐI ƯU TẢI: gộp 3 lệnh GET (owner_key, license, iplock) thành 1 lệnh MGET
+// duy nhất (Redis tính MGET là 1 lệnh dù đọc nhiều key) -> giảm từ 4 lệnh
+// Redis/lần xuống còn 2 lệnh/lần (MGET + SET gia hạn khóa).
 
 import { Redis } from "@upstash/redis";
 
@@ -29,6 +33,12 @@ function getClientIp(req) {
   return req.socket?.remoteAddress || "unknown";
 }
 
+function parseJson(v) {
+  if (v == null) return null;
+  if (typeof v === "string") { try { return JSON.parse(v); } catch (e) { return null; } }
+  return v;
+}
+
 export default async function handler(req, res) {
   const key = req.query.key;
 
@@ -36,8 +46,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ valid: false, reason: "Thiếu key" });
   }
 
-  // Key chủ -> luôn hợp lệ, bỏ qua Redis license lẫn khóa IP
-  const ownerKey = await redis.get("owner_key").catch(() => null);
+  const licenseKeyName = "vangioi_license:" + key;
+  const lockKeyName = "vangioi_iplock:" + key;
+
+  let ownerKey, infoRaw, lockRaw;
+  try {
+    [ownerKey, infoRaw, lockRaw] = await redis.mget("owner_key", licenseKeyName, lockKeyName);
+  } catch (e) {
+    return res.status(500).json({ valid: false, reason: "Lỗi database" });
+  }
+
+  // Key chủ -> luôn hợp lệ, bỏ qua license lẫn khóa IP
   if (ownerKey && key === ownerKey) {
     return res.status(200).json({
       valid: true,
@@ -50,19 +69,9 @@ export default async function handler(req, res) {
     });
   }
 
-  let info;
-  try {
-    info = await redis.get("vangioi_license:" + key);
-  } catch (e) {
-    return res.status(500).json({ valid: false, reason: "Lỗi database" });
-  }
-
+  let info = parseJson(infoRaw);
   if (!info) {
     return res.status(200).json({ valid: false, reason: "Key không tồn tại" });
-  }
-
-  if (typeof info === "string") {
-    try { info = JSON.parse(info); } catch (e) { info = { expires: info }; }
   }
 
   const now = new Date();
@@ -81,9 +90,7 @@ export default async function handler(req, res) {
 
   // === Khóa theo IP ===
   const ip = getClientIp(req);
-  const lockKeyName = "vangioi_iplock:" + key;
-  let lock = await redis.get(lockKeyName).catch(() => null);
-  if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
+  const lock = parseJson(lockRaw);
 
   const now2 = Date.now();
   const leaseExpired = !lock || (now2 - (lock.lastSeen || 0) > LEASE_TIMEOUT_MS);
