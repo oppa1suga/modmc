@@ -13,7 +13,7 @@
 // không bị khóa theo IP.
 //
 // KHÓA THEO IP: 1 key chỉ dùng được ở 1 IP tại một thời điểm. Mod gọi lại
-// endpoint này mỗi 2 phút (xem LicenseManager) để "gia hạn" quyền dùng IP đó.
+// endpoint này mỗi 10 phút (xem LicenseManager) để "gia hạn" quyền dùng IP đó.
 // Nếu quá LEASE_TIMEOUT_MS không thấy IP cũ gọi lại (game đã tắt) thì IP
 // khác dùng key đó sẽ tự chiếm được, không cần thao tác gì thêm.
 
@@ -21,7 +21,7 @@ import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
 
-const LEASE_TIMEOUT_MS = 3 * 60 * 1000; // 3 phút (dài hơn chu kỳ check 2 phút của mod)
+const LEASE_TIMEOUT_MS = 12 * 60 * 1000; // 12 phút (dài hơn chu kỳ check 10 phút của mod)
 
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
