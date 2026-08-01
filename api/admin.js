@@ -9,6 +9,8 @@
 //   ?action=get&key=XXX                       -> xem 1 key
 //   ?action=viewconfig                        -> xem config (tài khoản/mật khẩu) đã lưu
 //   ?action=releaseiplock&key=XXX&ns=vangioi  -> gỡ khóa IP cho key (mod vangioi)
+//   ?action=getminbuild                       -> xem số build tối thiểu hiện tại (mod vangioi)
+//   ?action=setminbuild&build=N                -> đặt số build tối thiểu (bản < N bị chặn)
 //
 // Thêm ?ns=vangioi vào bất kỳ request nào ở trên để quản lý key/config của mod
 // vangioi (namespace "vangioi_license:"/"vangioi_config:") thay vì mặc định
@@ -174,6 +176,22 @@ export default async function handler(req, res) {
     if (action === "deleteownerkey") {
       await redis.del("owner_key");
       return res.status(200).json({ ok: true, message: "Đã xóa key chủ" });
+    }
+
+    // === XEM số build tối thiểu (khóa phiên bản mod vangioi) ===
+    if (action === "getminbuild") {
+      const minBuild = await redis.get("vangioi_min_build");
+      return res.status(200).json({ ok: true, minBuild: parseInt(minBuild, 10) || 0 });
+    }
+
+    // === ĐẶT số build tối thiểu (bản mod cũ hơn số này sẽ bị chặn) ===
+    if (action === "setminbuild") {
+      const build = parseInt(req.query.build, 10);
+      if (isNaN(build) || build < 0) {
+        return res.status(400).json({ ok: false, error: "Thiếu hoặc sai build (số nguyên >= 0)" });
+      }
+      await redis.set("vangioi_min_build", build);
+      return res.status(200).json({ ok: true, minBuild: build });
     }
 
     return res.status(400).json({ ok: false, error: "action không hợp lệ" });

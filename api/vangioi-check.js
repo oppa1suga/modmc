@@ -20,9 +20,13 @@
 // (game đã tắt) thì phiên khác dùng key đó sẽ tự chiếm được, không cần thao
 // tác gì thêm.
 //
-// TỐI ƯU TẢI: gộp 3 lệnh GET (owner_key, license, iplock) thành 1 lệnh MGET
-// duy nhất (Redis tính MGET là 1 lệnh dù đọc nhiều key) -> giảm từ 4 lệnh
-// Redis/lần xuống còn 2 lệnh/lần (MGET + SET gia hạn khóa).
+// TỐI ƯU TẢI: gộp 4 lệnh GET (owner_key, license, iplock, min_build) thành 1
+// lệnh MGET duy nhất (Redis tính MGET là 1 lệnh dù đọc nhiều key).
+//
+// KHÓA PHIÊN BẢN: mỗi bản mod gửi kèm "build" (số nguyên, xem LicenseManager).
+// Redis khóa "vangioi_min_build" giữ số build TỐI THIỂU được phép chạy - đặt/xem
+// qua admin.html (?ns=vangioi, action=getminbuild/setminbuild). Bản mod cũ hơn
+// số này bị từ chối luôn, kể cả key còn hạn - buộc phải cập nhật bản mới.
 
 import { Redis } from "@upstash/redis";
 
@@ -52,14 +56,15 @@ export default async function handler(req, res) {
   const licenseKeyName = "vangioi_license:" + key;
   const lockKeyName = "vangioi_iplock:" + key;
 
-  let ownerKey, infoRaw, lockRaw;
+  let ownerKey, infoRaw, lockRaw, minBuildRaw;
   try {
-    [ownerKey, infoRaw, lockRaw] = await redis.mget("owner_key", licenseKeyName, lockKeyName);
+    [ownerKey, infoRaw, lockRaw, minBuildRaw] =
+        await redis.mget("owner_key", licenseKeyName, lockKeyName, "vangioi_min_build");
   } catch (e) {
     return res.status(500).json({ valid: false, reason: "Lỗi database" });
   }
 
-  // Key chủ -> luôn hợp lệ, bỏ qua license lẫn khóa IP
+  // Key chủ -> luôn hợp lệ, bỏ qua license, khóa IP lẫn khóa phiên bản
   if (ownerKey && key === ownerKey) {
     return res.status(200).json({
       valid: true,
@@ -69,6 +74,16 @@ export default async function handler(req, res) {
       secondsLeft: 999999999,
       daysLeft: 999999,
       hoursLeft: 0
+    });
+  }
+
+  // === Khóa phiên bản: bản mod cũ hơn mức tối thiểu -> từ chối luôn ===
+  const minBuild = parseInt(minBuildRaw, 10) || 0;
+  const clientBuild = parseInt(req.query.build, 10) || 0;
+  if (minBuild > 0 && clientBuild < minBuild) {
+    return res.status(200).json({
+      valid: false,
+      reason: "Phiên bản mod đã cũ, vui lòng tải bản mới"
     });
   }
 

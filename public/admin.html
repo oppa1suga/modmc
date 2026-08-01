@@ -95,6 +95,15 @@
       </div>
     </div>
 
+    <div class="card" id="minBuildCard" style="display:none">
+      <h3>Khóa phiên bản mod (Vangioi)</h3>
+      <div class="sub" style="margin-bottom:8px">Bản mod có số build NHỎ HƠN số dưới đây sẽ bị chặn, buộc người dùng tải bản mới. Số build lấy từ hằng số MOD_BUILD trong LicenseManager.java của mod.</div>
+      <div class="row">
+        <input id="minBuildBox" type="number" min="0" placeholder="Số build tối thiểu (0 = không khóa)" style="flex:1">
+        <button class="btn-primary" onclick="setMinBuild()">Cập nhật</button>
+      </div>
+    </div>
+
     <div class="stats">
       <div class="stat"><div class="num" id="stTotal">0</div><div class="lbl">Tổng key</div></div>
       <div class="stat"><div class="num" id="stActive">0</div><div class="lbl">Còn hạn</div></div>
@@ -162,6 +171,23 @@ function switchNs(ns) {
   document.getElementById("cfgMeta").textContent = "Chưa tải.";
   document.getElementById("cfgTable").style.display = "none";
   document.getElementById("cfgBody").style.display = "none";
+  document.getElementById("minBuildCard").style.display = ns === "vangioi" ? "block" : "none";
+  if (ns === "vangioi") loadMinBuild();
+}
+
+function loadMinBuild() {
+  api("getminbuild").then(data => {
+    if (data.ok) document.getElementById("minBuildBox").value = data.minBuild;
+  });
+}
+
+function setMinBuild() {
+  const build = document.getElementById("minBuildBox").value;
+  if (build === "" || isNaN(build) || Number(build) < 0) { alert("Nhập số build hợp lệ (>= 0)"); return; }
+  api("setminbuild", { build }).then(data => {
+    if (data.ok) { document.getElementById("minBuildBox").value = data.minBuild; alert("Đã cập nhật build tối thiểu: " + data.minBuild); }
+    else alert(data.error);
+  });
 }
 
 function login() {
