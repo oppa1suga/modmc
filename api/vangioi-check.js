@@ -12,10 +12,13 @@
 // hợp lệ, dùng chung cho cả mod minerua và vangioi, không có ngày hết hạn,
 // không bị khóa theo IP.
 //
-// KHÓA THEO IP: 1 key chỉ dùng được ở 1 IP tại một thời điểm. Mod gọi lại
-// endpoint này mỗi 10 phút (xem LicenseManager) để "gia hạn" quyền dùng IP đó.
-// Nếu quá LEASE_TIMEOUT_MS không thấy IP cũ gọi lại (game đã tắt) thì IP
-// khác dùng key đó sẽ tự chiếm được, không cần thao tác gì thêm.
+// KHÓA THEO (IP + SESSION): 1 key chỉ dùng được ở 1 phiên game (1 tab/instance
+// Minecraft) tại một thời điểm - kể cả 2 tab CÙNG máy (cùng IP) cũng bị chặn
+// lẫn nhau, vì mỗi lần mở game LicenseManager tự sinh 1 session ID ngẫu nhiên
+// riêng (không lưu file). Mod gọi lại endpoint này mỗi 10 phút để "gia hạn"
+// quyền dùng phiên đó. Nếu quá LEASE_TIMEOUT_MS không thấy phiên cũ gọi lại
+// (game đã tắt) thì phiên khác dùng key đó sẽ tự chiếm được, không cần thao
+// tác gì thêm.
 //
 // TỐI ƯU TẢI: gộp 3 lệnh GET (owner_key, license, iplock) thành 1 lệnh MGET
 // duy nhất (Redis tính MGET là 1 lệnh dù đọc nhiều key) -> giảm từ 4 lệnh
@@ -88,8 +91,9 @@ export default async function handler(req, res) {
     });
   }
 
-  // === Khóa theo IP ===
+  // === Khóa theo (IP + session) ===
   const ip = getClientIp(req);
+  const session = req.query.session || "";
   const lock = parseJson(lockRaw);
 
   const now2 = Date.now();
@@ -97,19 +101,22 @@ export default async function handler(req, res) {
 
   const igName = req.query.user || "";
 
-  if (!leaseExpired && lock.ip !== ip) {
-    // IP khác đang giữ key này và vẫn còn hoạt động (chưa hết hạn thuê)
+  const sameSession = lock && lock.ip === ip && lock.session === session;
+
+  if (!leaseExpired && !sameSession) {
+    // Phiên khác (IP khác, hoặc cùng IP nhưng khác tab/instance) đang giữ key
+    // này và vẫn còn hoạt động (chưa hết hạn thuê)
     return res.status(200).json({
       valid: false,
-      reason: "Key đang được dùng ở máy/IP khác"
+      reason: "Key đang được dùng ở nơi khác"
         + (lock.igName ? " (tài khoản: " + lock.igName + ")" : ""),
       user: info.user || "",
       expires: info.expires
     });
   }
 
-  // Chiếm/gia hạn khóa cho IP này
-  await redis.set(lockKeyName, JSON.stringify({ ip, lastSeen: now2, igName }));
+  // Chiếm/gia hạn khóa cho phiên này
+  await redis.set(lockKeyName, JSON.stringify({ ip, session, lastSeen: now2, igName }));
 
   const secondsLeft = Math.floor(msLeft / 1000);
   const daysLeft = Math.floor(secondsLeft / 86400);
