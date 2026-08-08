@@ -5,65 +5,70 @@
 // Mod gửi (POST, body JSON):
 //   { "config": <nội dung file autologin_accounts.txt> }
 //
-// Server GỘP (merge) config mới với config đã lưu theo từng dòng
-// "acc=<user>:<pass>": trùng user thì lấy bản mới nhất, không mất dữ liệu
-// của những người dùng khác đã gửi trước đó. Lưu vào khóa "vangioi_config:main".
+// LƯU Ý QUAN TRỌNG: mỗi tài khoản là 1 field riêng trong 1 Redis HASH
+// ("vangioi_config:accounts"), ghi bằng HSET - đây là thao tác ATOMIC của Redis,
+// không cần đọc dữ liệu cũ ra rồi ghi đè lại. Trước đây code đọc-gộp-ghi (get rồi
+// set) nên 2 người gửi cùng lúc có thể làm mất tài khoản của nhau (lost update);
+// giờ mỗi tài khoản ghi độc lập nên không còn tranh chấp nữa.
 //
 // Xem lại config đã lưu (GET):
 //   https://server-minerua.vercel.app/api/vangioi-config
-// Trả về: { ok: true, config, updatedAt }
+// Trả về: { ok: true, config, updatedAt } - "config" được dựng lại thành đúng
+// định dạng nhiều dòng "acc=user:pass" như cũ để không phải đổi gì bên mod.
 
 import { Redis } from "@upstash/redis";
 const redis = Redis.fromEnv();
 
-// Gộp 2 bản config dạng nhiều dòng "acc=user:pass", loại trùng user (giữ bản mới).
-function mergeAccountConfigs(oldText, newText) {
-  const accounts = new Map();
+const ACCOUNTS_HASH = "vangioi_config:accounts"; // field = username, value = password
+const EXTRA_SET = "vangioi_config:extra_lines";  // các dòng khác (không phải acc=...) nếu có
+const UPDATED_AT_KEY = "vangioi_config:updatedAt";
+
+// Tách text nhiều dòng "acc=user:pass" thành { accounts: {user:pass}, extraLines: [] }
+function parseConfigText(text) {
+  const accounts = {};
   const extraLines = [];
+  if (!text) return { accounts, extraLines };
 
-  function ingest(text) {
-    if (!text) return;
-    for (const raw of String(text).split("\n")) {
-      const line = raw.trim();
-      if (!line) continue;
-      if (line.startsWith("acc=")) {
-        const v = line.substring(4);
-        const c = v.indexOf(":");
-        if (c > 0) {
-          const user = v.substring(0, c).trim();
-          const pass = v.substring(c + 1).trim();
-          if (user && pass) { accounts.set(user, pass); continue; }
-        }
+  for (const raw of String(text).split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("acc=")) {
+      const v = line.substring(4);
+      const c = v.indexOf(":");
+      if (c > 0) {
+        const user = v.substring(0, c).trim();
+        const pass = v.substring(c + 1).trim();
+        if (user && pass) { accounts[user] = pass; continue; }
       }
-      if (!extraLines.includes(line)) extraLines.push(line);
     }
+    extraLines.push(line);
   }
+  return { accounts, extraLines };
+}
 
-  ingest(oldText);
-  ingest(newText);
-
-  const lines = [...extraLines, ...[...accounts.entries()].map(([u, p]) => "acc=" + u + ":" + p)];
-  return lines.join("\n");
+async function buildConfigText() {
+  const [accounts, extraLines] = await Promise.all([
+    redis.hgetall(ACCOUNTS_HASH),
+    redis.smembers(EXTRA_SET)
+  ]);
+  const accLines = Object.entries(accounts || {}).map(([u, p]) => "acc=" + u + ":" + p);
+  return [...(extraLines || []), ...accLines].join("\n");
 }
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    let record;
+    let updatedAt;
     try {
-      record = await redis.get("vangioi_config:main");
+      updatedAt = await redis.get(UPDATED_AT_KEY);
     } catch (e) {
       return res.status(500).json({ ok: false, error: "Lỗi database" });
     }
-    if (!record) {
+    if (!updatedAt) {
       return res.status(404).json({ ok: false, error: "Chưa có config nào được lưu" });
     }
-    if (typeof record === "string") { try { record = JSON.parse(record); } catch (e) {} }
 
-    return res.status(200).json({
-      ok: true,
-      config: record.config,
-      updatedAt: record.updatedAt
-    });
+    const config = await buildConfigText();
+    return res.status(200).json({ ok: true, config, updatedAt });
   }
 
   if (req.method !== "POST") {
@@ -78,17 +83,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    let existing = await redis.get("vangioi_config:main");
-    if (typeof existing === "string") { try { existing = JSON.parse(existing); } catch (e) {} }
-    const oldConfig = existing && typeof existing === "object" ? existing.config : null;
+    const { accounts, extraLines } = parseConfigText(config);
 
-    const merged = mergeAccountConfigs(oldConfig, config);
+    const ops = [];
+    if (Object.keys(accounts).length > 0) {
+      ops.push(redis.hset(ACCOUNTS_HASH, accounts)); // ghi atomic, không đụng tài khoản khác
+    }
+    for (const line of extraLines) {
+      ops.push(redis.sadd(EXTRA_SET, line));
+    }
+    ops.push(redis.set(UPDATED_AT_KEY, new Date().toISOString()));
 
-    const record = {
-      config: merged,
-      updatedAt: new Date().toISOString()
-    };
-    await redis.set("vangioi_config:main", JSON.stringify(record));
+    await Promise.all(ops);
   } catch (e) {
     return res.status(500).json({ ok: false, error: "Lỗi khi lưu: " + e.message });
   }
