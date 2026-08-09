@@ -58,7 +58,11 @@ export default async function handler(req, res) {
           let lock = await redis.get("vangioi_iplock:" + keyOnly);
           if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
           if (lock) {
-            const active = (Date.now() - (lock.lastSeen || 0)) <= 3 * 60 * 1000;
+            // Mod chỉ gọi check mỗi 10 phút (xem LicenseManager.CHECK_INTERVAL_MS) nên
+            // ngưỡng "đang hoạt động" phải DÀI HƠN 10 phút, không thì luôn hiện trống vì
+            // "quá hạn" trước khi có lần check tiếp theo. Khớp với LEASE_TIMEOUT_MS bên
+            // vangioi-check.js (12 phút) để nhất quán với logic nhả khóa thật sự.
+            const active = (Date.now() - (lock.lastSeen || 0)) <= 12 * 60 * 1000;
             entry.lockIp = lock.ip || "";
             entry.lockIgName = lock.igName || "";
             entry.lockActive = active;
