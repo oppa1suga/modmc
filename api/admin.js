@@ -9,6 +9,7 @@
 //   ?action=get&key=XXX                       -> xem 1 key
 //   ?action=viewconfig                        -> xem config (tài khoản/mật khẩu) đã lưu
 //   ?action=releaseiplock&key=XXX&ns=vangioi  -> gỡ khóa IP cho key (mod vangioi)
+//   ?action=kick&key=XXX&ns=vangioi           -> yêu cầu văng acc đang dùng key khỏi server (mod vangioi)
 //   ?action=getminbuild                       -> xem số build tối thiểu hiện tại (mod vangioi)
 //   ?action=setminbuild&build=N                -> đặt số build tối thiểu (bản < N bị chặn)
 //
@@ -129,6 +130,16 @@ export default async function handler(req, res) {
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
       await redis.del("vangioi_iplock:" + key);
       return res.status(200).json({ ok: true, message: "Đã gỡ khóa IP cho key " + key });
+    }
+
+    // === KICK: yêu cầu acc đang dùng key này bị ngắt kết nối khỏi server (chỉ vangioi) ===
+    // Chỉ đặt 1 CỜ trong Redis - mod chỉ nhận ra ở lần gọi /api/vangioi-check TIẾP THEO
+    // (chu kỳ 10 phút), nên có thể mất tới ~10 phút mới có hiệu lực, không phải tức thì.
+    if (action === "kick") {
+      const key = req.query.key;
+      if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
+      await redis.set("vangioi_kick:" + key, "1");
+      return res.status(200).json({ ok: true, message: "Đã yêu cầu kick key " + key + " (có hiệu lực trong tối đa ~10 phút, ở lần check tiếp theo của mod)" });
     }
 
     // === XEM CONFIG (tài khoản/mật khẩu) đã lưu ===

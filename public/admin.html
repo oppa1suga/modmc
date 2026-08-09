@@ -350,6 +350,8 @@ function renderKeys() {
       "<td>" +
         (currentNs === "vangioi"
           ? "<button class='btn-gray btn-small' onclick=\"releaseIpLock('" + k.key + "')\">Gỡ IP</button> "
+            + "<button class='btn-danger btn-small' onclick=\"kickKey('" + k.key + "')\""
+            + (k.lockActive ? "" : " disabled title='Không có ai đang dùng key này'") + ">Kick</button> "
           : "") +
         "<button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button>" +
       "</td>";
@@ -392,6 +394,11 @@ function delKey(key) {
 function releaseIpLock(key) {
   if (!confirm("Gỡ khóa IP cho key " + key + "? IP/máy khác sẽ dùng được ngay.")) return;
   api("releaseiplock", { key }).then(data => { if (data.ok) loadKeys(); else alert(data.error); });
+}
+
+function kickKey(key) {
+  if (!confirm("Yêu cầu văng acc đang dùng key " + key + " khỏi server? Có thể mất tới ~10 phút mới có hiệu lực (mod chỉ kiểm tra định kỳ).")) return;
+  api("kick", { key }).then(data => { if (data.ok) alert(data.message); else alert(data.error); });
 }
 
 function cp(text) {

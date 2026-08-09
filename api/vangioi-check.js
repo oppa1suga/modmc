@@ -20,13 +20,20 @@
 // (game đã tắt) thì phiên khác dùng key đó sẽ tự chiếm được, không cần thao
 // tác gì thêm.
 //
-// TỐI ƯU TẢI: gộp 4 lệnh GET (owner_key, license, iplock, min_build) thành 1
+// TỐI ƯU TẢI: gộp 5 lệnh GET (owner_key, license, iplock, min_build, kick) thành 1
 // lệnh MGET duy nhất (Redis tính MGET là 1 lệnh dù đọc nhiều key).
 //
 // KHÓA PHIÊN BẢN: mỗi bản mod gửi kèm "build" (số nguyên, xem LicenseManager).
 // Redis khóa "vangioi_min_build" giữ số build TỐI THIỂU được phép chạy - đặt/xem
 // qua admin.html (?ns=vangioi, action=getminbuild/setminbuild). Bản mod cũ hơn
 // số này bị từ chối luôn, kể cả key còn hạn - buộc phải cập nhật bản mới.
+//
+// NÚT "KICK" (admin.html): admin bấm -> đặt cờ "vangioi_kick:<key>" trong Redis
+// (xem api/admin.js, action=kick). Response trả về "kick": true đúng 1 LẦN (cờ tự
+// xóa ngay khi đọc, không lặp lại) - mod (LicenseManager) thấy cờ này thì tự
+// disconnect khỏi server, BẤT KỂ key còn hợp lệ hay không. Vì mod chỉ gọi endpoint
+// này mỗi 10 phút, kick có thể mất tới ~10 phút mới có hiệu lực (đánh đổi để không
+// tốn thêm lệnh Redis polling riêng - xem ghi chú ngân sách Redis trong project memory).
 
 import { Redis } from "@upstash/redis";
 
@@ -55,13 +62,22 @@ export default async function handler(req, res) {
 
   const licenseKeyName = "vangioi_license:" + key;
   const lockKeyName = "vangioi_iplock:" + key;
+  const kickKeyName = "vangioi_kick:" + key;
 
-  let ownerKey, infoRaw, lockRaw, minBuildRaw;
+  let ownerKey, infoRaw, lockRaw, minBuildRaw, kickRaw;
   try {
-    [ownerKey, infoRaw, lockRaw, minBuildRaw] =
-        await redis.mget("owner_key", licenseKeyName, lockKeyName, "vangioi_min_build");
+    [ownerKey, infoRaw, lockRaw, minBuildRaw, kickRaw] =
+        await redis.mget("owner_key", licenseKeyName, lockKeyName, "vangioi_min_build", kickKeyName);
   } catch (e) {
     return res.status(500).json({ valid: false, reason: "Lỗi database" });
+  }
+
+  // Cờ "kick" (nếu có) -> xóa ngay (chỉ báo 1 lần) rồi gắn vào MỌI response bên
+  // dưới, bất kể key có hợp lệ hay không - mod thấy cờ này là tự ngắt kết nối.
+  let kick = false;
+  if (kickRaw) {
+    kick = true;
+    try { await redis.del(kickKeyName); } catch (e) { /* không chặn response vì lỗi phụ này */ }
   }
 
   // Key chủ -> luôn hợp lệ, bỏ qua license, khóa IP lẫn khóa phiên bản
@@ -73,7 +89,8 @@ export default async function handler(req, res) {
       expires: "9999-12-31",
       secondsLeft: 999999999,
       daysLeft: 999999,
-      hoursLeft: 0
+      hoursLeft: 0,
+      kick
     });
   }
 
@@ -83,13 +100,14 @@ export default async function handler(req, res) {
   if (minBuild > 0 && clientBuild < minBuild) {
     return res.status(200).json({
       valid: false,
-      reason: "Phiên bản mod đã cũ, vui lòng tải bản mới"
+      reason: "Phiên bản mod đã cũ, vui lòng tải bản mới",
+      kick
     });
   }
 
   let info = parseJson(infoRaw);
   if (!info) {
-    return res.status(200).json({ valid: false, reason: "Key không tồn tại" });
+    return res.status(200).json({ valid: false, reason: "Key không tồn tại", kick });
   }
 
   const now = new Date();
@@ -102,7 +120,8 @@ export default async function handler(req, res) {
       reason: "Key đã hết hạn",
       user: info.user || "",
       expires: info.expires,
-      secondsLeft: 0
+      secondsLeft: 0,
+      kick
     });
   }
 
@@ -126,7 +145,8 @@ export default async function handler(req, res) {
       reason: "Key đang được dùng ở nơi khác"
         + (lock.igName ? " (tài khoản: " + lock.igName + ")" : ""),
       user: info.user || "",
-      expires: info.expires
+      expires: info.expires,
+      kick
     });
   }
 
@@ -144,6 +164,7 @@ export default async function handler(req, res) {
     expires: info.expires,
     secondsLeft: secondsLeft,
     daysLeft: daysLeft,
-    hoursLeft: hoursLeft
+    hoursLeft: hoursLeft,
+    kick
   });
 }
