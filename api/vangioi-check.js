@@ -20,6 +20,12 @@
 // (game đã tắt) thì phiên khác dùng key đó sẽ tự chiếm được, không cần thao
 // tác gì thêm.
 //
+// KHÓA CỨNG IP (nút "Khóa IP" trong admin.html, action=hardlockip trong
+// api/admin.js): đánh dấu "hardLocked":true lên bản ghi khóa hiện tại của key -
+// từ đó CHỈ đúng IP đó mới dùng được key này, IP khác bị từ chối vĩnh viễn (bỏ
+// qua cơ chế hết hạn thuê 12 phút ở trên), cho tới khi admin gỡ (action=unhardlockip
+// hoặc "Gỡ IP" xóa hẳn khóa).
+//
 // TỐI ƯU TẢI: gộp 5 lệnh GET (owner_key, license, iplock, min_build, kick) thành 1
 // lệnh MGET duy nhất (Redis tính MGET là 1 lệnh dù đọc nhiều key).
 //
@@ -125,19 +131,34 @@ export default async function handler(req, res) {
     });
   }
 
-  // === Khóa theo (IP + session) ===
+  // === Khóa theo (IP + session), có thể "khóa cứng" 1 IP qua admin.html ===
   const ip = getClientIp(req);
   const session = req.query.session || "";
   const lock = parseJson(lockRaw);
 
   const now2 = Date.now();
+  const hardLocked = !!(lock && lock.hardLocked);
   const leaseExpired = !lock || (now2 - (lock.lastSeen || 0) > LEASE_TIMEOUT_MS);
-
   const igName = req.query.user || "";
 
-  const sameSession = lock && lock.ip === ip && lock.session === session;
+  const sameIp = !!(lock && lock.ip === ip);
+  const sameSession = sameIp && lock.session === session;
 
-  if (!leaseExpired && !sameSession) {
+  if (hardLocked && !sameIp) {
+    // Admin đã khóa cứng key này vào 1 IP cụ thể (nút "Khóa IP" trong admin.html) -
+    // IP khác KHÔNG BAO GIỜ chiếm được, kể cả khi IP đã khóa ngừng hoạt động lâu
+    // (bỏ qua leaseExpired hoàn toàn, khác với khóa mềm 12 phút bình thường).
+    return res.status(200).json({
+      valid: false,
+      reason: "Key đã bị khóa cứng vào IP khác"
+        + (lock.igName ? " (tài khoản: " + lock.igName + ")" : ""),
+      user: info.user || "",
+      expires: info.expires,
+      kick
+    });
+  }
+
+  if (!hardLocked && !leaseExpired && !sameSession) {
     // Phiên khác (IP khác, hoặc cùng IP nhưng khác tab/instance) đang giữ key
     // này và vẫn còn hoạt động (chưa hết hạn thuê)
     return res.status(200).json({
@@ -150,8 +171,11 @@ export default async function handler(req, res) {
     });
   }
 
-  // Chiếm/gia hạn khóa cho phiên này
-  await redis.set(lockKeyName, JSON.stringify({ ip, session, lastSeen: now2, igName }));
+  // Chiếm/gia hạn khóa cho phiên này (giữ nguyên cờ khóa cứng nếu IP không đổi)
+  await redis.set(lockKeyName, JSON.stringify({
+    ip, session, lastSeen: now2, igName,
+    hardLocked: hardLocked && sameIp
+  }));
 
   const secondsLeft = Math.floor(msLeft / 1000);
   const daysLeft = Math.floor(secondsLeft / 86400);

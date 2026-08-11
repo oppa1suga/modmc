@@ -8,7 +8,9 @@
 //   ?action=delete&key=XXX                    -> xóa key
 //   ?action=get&key=XXX                       -> xem 1 key
 //   ?action=viewconfig                        -> xem config (tài khoản/mật khẩu) đã lưu
-//   ?action=releaseiplock&key=XXX&ns=vangioi  -> gỡ khóa IP cho key (mod vangioi)
+//   ?action=releaseiplock&key=XXX&ns=vangioi  -> gỡ khóa IP cho key (mod vangioi, xóa hẳn)
+//   ?action=hardlockip&key=XXX&ns=vangioi     -> khóa CỨNG key vào đúng IP đang dùng hiện tại (mod vangioi)
+//   ?action=unhardlockip&key=XXX&ns=vangioi   -> gỡ khóa cứng (không xóa khóa, IP khác lại tranh được như bình thường)
 //   ?action=kick&key=XXX&ns=vangioi           -> yêu cầu văng acc đang dùng key khỏi server (mod vangioi)
 //   ?action=getminbuild                       -> xem số build tối thiểu hiện tại (mod vangioi)
 //   ?action=setminbuild&build=N                -> đặt số build tối thiểu (bản < N bị chặn)
@@ -66,6 +68,7 @@ export default async function handler(req, res) {
             entry.lockIp = lock.ip || "";
             entry.lockIgName = lock.igName || "";
             entry.lockActive = active;
+            entry.hardLocked = !!lock.hardLocked;
           }
         }
 
@@ -128,12 +131,38 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, key, info: info || null });
     }
 
-    // === GỠ KHÓA IP (chỉ áp dụng cho key vangioi, ?ns=vangioi) ===
+    // === GỠ KHÓA IP (chỉ áp dụng cho key vangioi, ?ns=vangioi) - xóa hẳn, ai cũng tranh được ===
     if (action === "releaseiplock") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
       await redis.del("vangioi_iplock:" + key);
       return res.status(200).json({ ok: true, message: "Đã gỡ khóa IP cho key " + key });
+    }
+
+    // === KHÓA CỨNG vào đúng IP đang dùng hiện tại (chỉ vangioi) ===
+    if (action === "hardlockip") {
+      const key = req.query.key;
+      if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
+      const lockKeyName = "vangioi_iplock:" + key;
+      let lock = await redis.get(lockKeyName);
+      if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
+      if (!lock) return res.status(404).json({ ok: false, error: "Key này hiện không có ai dùng, chưa có IP để khóa" });
+      lock.hardLocked = true;
+      await redis.set(lockKeyName, JSON.stringify(lock));
+      return res.status(200).json({ ok: true, message: "Đã khóa cứng key " + key + " vào IP " + lock.ip });
+    }
+
+    // === GỠ KHÓA CỨNG (không xóa khóa, chỉ bỏ cờ - IP khác lại tranh được như bình thường) ===
+    if (action === "unhardlockip") {
+      const key = req.query.key;
+      if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
+      const lockKeyName = "vangioi_iplock:" + key;
+      let lock = await redis.get(lockKeyName);
+      if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
+      if (!lock) return res.status(404).json({ ok: false, error: "Không có khóa nào cho key này" });
+      lock.hardLocked = false;
+      await redis.set(lockKeyName, JSON.stringify(lock));
+      return res.status(200).json({ ok: true, message: "Đã gỡ khóa cứng cho key " + key });
     }
 
     // === KICK: yêu cầu acc đang dùng key này bị ngắt kết nối khỏi server (chỉ vangioi) ===

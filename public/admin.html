@@ -333,8 +333,15 @@ function renderKeys() {
     let usingCell = "-";
     if (currentNs === "vangioi" && k.lockActive) {
       usingCell = "<span class='badge b-ok'>" + (k.lockIgName || "?") + "</span> "
-        + "<span class='keycell'>" + (k.lockIp || "") + "</span>";
+        + "<span class='keycell'>" + (k.lockIp || "") + "</span>"
+        + (k.hardLocked ? " <span class='badge b-warn'>🔒 khóa cứng</span>" : "");
     }
+
+    const hasLock = currentNs === "vangioi" && !!k.lockIp;
+    const hardLockBtn = k.hardLocked
+      ? "<button class='btn-blue btn-small' onclick=\"unhardLockIp('" + k.key + "')\">Gỡ khóa cứng</button> "
+      : "<button class='btn-gray btn-small' onclick=\"hardLockIp('" + k.key + "')\""
+        + (hasLock ? "" : " disabled title='Chưa có ai dùng key này để khóa'") + ">Khóa IP</button> ";
 
     const tr = document.createElement("tr");
     tr.innerHTML =
@@ -350,6 +357,7 @@ function renderKeys() {
       "<td>" +
         (currentNs === "vangioi"
           ? "<button class='btn-gray btn-small' onclick=\"releaseIpLock('" + k.key + "')\">Gỡ IP</button> "
+            + hardLockBtn
             + "<button class='btn-danger btn-small' onclick=\"kickKey('" + k.key + "')\""
             + (k.lockActive ? "" : " disabled title='Không có ai đang dùng key này'") + ">Kick</button> "
           : "") +
@@ -399,6 +407,16 @@ function releaseIpLock(key) {
 function kickKey(key) {
   if (!confirm("Yêu cầu văng acc đang dùng key " + key + " khỏi server? Có thể mất tới ~10 phút mới có hiệu lực (mod chỉ kiểm tra định kỳ).")) return;
   api("kick", { key }).then(data => { if (data.ok) alert(data.message); else alert(data.error); });
+}
+
+function hardLockIp(key) {
+  if (!confirm("Khóa cứng key " + key + " vào đúng IP đang dùng hiện tại? IP/máy khác sẽ KHÔNG BAO GIỜ dùng được key này nữa, kể cả sau khi hết hạn thuê 12 phút, cho tới khi bạn gỡ khóa cứng.")) return;
+  api("hardlockip", { key }).then(data => { if (data.ok) { alert(data.message); loadKeys(); } else alert(data.error); });
+}
+
+function unhardLockIp(key) {
+  if (!confirm("Gỡ khóa cứng cho key " + key + "? IP/máy khác sẽ tranh được key này bình thường trở lại (vẫn theo cơ chế thuê 12 phút).")) return;
+  api("unhardlockip", { key }).then(data => { if (data.ok) { alert(data.message); loadKeys(); } else alert(data.error); });
 }
 
 function cp(text) {
