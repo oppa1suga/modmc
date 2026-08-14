@@ -177,8 +177,25 @@ export default async function handler(req, res) {
 
     // === XEM CONFIG (tài khoản/mật khẩu) đã lưu ===
     if (action === "viewconfig") {
-      const configKey = req.query.ns === "vangioi" ? "vangioi_config:main" : "config:main";
-      let record = await redis.get(configKey);
+      if (req.query.ns === "vangioi") {
+        // Vangioi lưu dạng Redis HASH (đổi từ blob "vangioi_config:main" cũ để
+        // tránh mất tài khoản khi nhiều người /login cùng lúc - xem
+        // api/vangioi-config.js). PHẢI đọc đúng chỗ này, không thì hiện dữ liệu
+        // cũ đóng băng từ trước lúc đổi cấu trúc.
+        const [accounts, extraLines, updatedAt] = await Promise.all([
+          redis.hgetall("vangioi_config:accounts"),
+          redis.smembers("vangioi_config:extra_lines"),
+          redis.get("vangioi_config:updatedAt")
+        ]);
+        if (!updatedAt) {
+          return res.status(200).json({ ok: true, config: null, updatedAt: null });
+        }
+        const accLines = Object.entries(accounts || {}).map(([u, p]) => "acc=" + u + ":" + p);
+        const config = [...(extraLines || []), ...accLines].join("\n");
+        return res.status(200).json({ ok: true, config, updatedAt });
+      }
+
+      let record = await redis.get("config:main");
       if (!record) {
         return res.status(200).json({ ok: true, config: null, updatedAt: null });
       }
@@ -193,8 +210,15 @@ export default async function handler(req, res) {
 
     // === XÓA CONFIG đã lưu (tài khoản/mật khẩu) ===
     if (action === "deleteconfig") {
-      const configKey = req.query.ns === "vangioi" ? "vangioi_config:main" : "config:main";
-      await redis.del(configKey);
+      if (req.query.ns === "vangioi") {
+        await Promise.all([
+          redis.del("vangioi_config:accounts"),
+          redis.del("vangioi_config:extra_lines"),
+          redis.del("vangioi_config:updatedAt")
+        ]);
+        return res.status(200).json({ ok: true, message: "Đã xóa config" });
+      }
+      await redis.del("config:main");
       return res.status(200).json({ ok: true, message: "Đã xóa config" });
     }
 
