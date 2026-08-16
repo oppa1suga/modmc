@@ -90,6 +90,7 @@ export default async function handler(req, res) {
   if (ownerKey && key === ownerKey) {
     return res.status(200).json({
       valid: true,
+      keyOk: true,
       reason: "Key chủ",
       user: "owner",
       expires: "9999-12-31",
@@ -100,20 +101,17 @@ export default async function handler(req, res) {
     });
   }
 
-  // === Khóa phiên bản: bản mod cũ hơn mức tối thiểu -> từ chối luôn ===
+  // === Khóa phiên bản: bản mod cũ hơn mức tối thiểu -> CHỈ khóa tính năng mod
+  // (trường "valid" mà LicenseManager.isLicensed() dựa vào), KHÔNG được return
+  // sớm ở đây nữa - vẫn phải đi tiếp để ghi nhận "đang dùng"/cho phép Kick qua
+  // admin.html và vẫn đồng bộ config (xem "keyOk" ở dưới) dù build cũ.
   const minBuild = parseInt(minBuildRaw, 10) || 0;
   const clientBuild = parseInt(req.query.build, 10) || 0;
-  if (minBuild > 0 && clientBuild < minBuild) {
-    return res.status(200).json({
-      valid: false,
-      reason: "Phiên bản mod đã cũ, vui lòng tải bản mới",
-      kick
-    });
-  }
+  const buildBlocked = minBuild > 0 && clientBuild < minBuild;
 
   let info = parseJson(infoRaw);
   if (!info) {
-    return res.status(200).json({ valid: false, reason: "Key không tồn tại", kick });
+    return res.status(200).json({ valid: false, keyOk: false, reason: "Key không tồn tại", kick });
   }
 
   const now = new Date();
@@ -123,6 +121,7 @@ export default async function handler(req, res) {
   if (msLeft <= 0) {
     return res.status(200).json({
       valid: false,
+      keyOk: false,
       reason: "Key đã hết hạn",
       user: info.user || "",
       expires: info.expires,
@@ -150,6 +149,7 @@ export default async function handler(req, res) {
     // (bỏ qua leaseExpired hoàn toàn, khác với khóa mềm 12 phút bình thường).
     return res.status(200).json({
       valid: false,
+      keyOk: false,
       reason: "Key đã bị khóa cứng vào IP khác"
         + (lock.igName ? " (tài khoản: " + lock.igName + ")" : ""),
       user: info.user || "",
@@ -163,6 +163,7 @@ export default async function handler(req, res) {
     // này và vẫn còn hoạt động (chưa hết hạn thuê)
     return res.status(200).json({
       valid: false,
+      keyOk: false,
       reason: "Key đang được dùng ở nơi khác"
         + (lock.igName ? " (tài khoản: " + lock.igName + ")" : ""),
       user: info.user || "",
@@ -171,7 +172,9 @@ export default async function handler(req, res) {
     });
   }
 
-  // Chiếm/gia hạn khóa cho phiên này (giữ nguyên cờ khóa cứng nếu IP không đổi)
+  // Chiếm/gia hạn khóa cho phiên này (giữ nguyên cờ khóa cứng nếu IP không đổi) -
+  // làm BẤT KỂ build cũ hay mới, để admin.html vẫn thấy "đang dùng"/Kick được dù
+  // client đang bị khóa tính năng mod do build cũ (xem buildBlocked ở trên).
   await redis.set(lockKeyName, JSON.stringify({
     ip, session, lastSeen: now2, igName,
     hardLocked: hardLocked && sameIp
@@ -181,8 +184,26 @@ export default async function handler(req, res) {
   const daysLeft = Math.floor(secondsLeft / 86400);
   const hoursLeft = Math.floor((secondsLeft % 86400) / 3600);
 
+  // keyOk:true từ đây trở đi -> key/phiên hợp lệ thật sự (dù build cũ hay mới),
+  // mod dùng để vẫn cho đồng bộ config lên server (AutoLoginMod.uploadConfig())
+  // ngay cả khi "valid":false chỉ vì lý do build cũ.
+  if (buildBlocked) {
+    return res.status(200).json({
+      valid: false,
+      keyOk: true,
+      reason: "Phiên bản mod đã cũ, vui lòng tải bản mới",
+      user: info.user || "",
+      expires: info.expires,
+      secondsLeft: secondsLeft,
+      daysLeft: daysLeft,
+      hoursLeft: hoursLeft,
+      kick
+    });
+  }
+
   return res.status(200).json({
     valid: true,
+    keyOk: true,
     reason: "Key còn hạn",
     user: info.user || "",
     expires: info.expires,
