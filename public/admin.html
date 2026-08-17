@@ -138,7 +138,7 @@
       <button class="btn-danger btn-small" onclick="deleteConfig()">Xóa config</button>
       <div class="cfg-meta" id="cfgMeta">Chưa tải.</div>
       <table id="cfgTable" style="display:none">
-        <thead><tr><th>Ingame</th><th>Pass</th></tr></thead>
+        <thead><tr><th>Ingame</th><th>Pass</th><th>IP gần nhất</th></tr></thead>
         <tbody id="cfgAccBody"></tbody>
       </table>
       <pre class="cfg" id="cfgBody" style="display:none">-</pre>
@@ -267,6 +267,7 @@ function loadConfig() {
     }
 
     const accounts = parseAccounts(data.config);
+    const accountMeta = data.accountMeta || {};
     const tableEl = document.getElementById("cfgTable");
     const preEl = document.getElementById("cfgBody");
     const accBody = document.getElementById("cfgAccBody");
@@ -274,10 +275,18 @@ function loadConfig() {
     if (accounts.length > 0) {
       accBody.innerHTML = "";
       accounts.forEach(a => {
+        const meta = accountMeta[a.user];
+        // IP lúc mod gửi config lên gần nhất cho account này - đối chiếu với cột
+        // "Đang dùng (IP)" bên danh sách key (tab Key) để suy ra key tương ứng, vì
+        // endpoint gửi config không nhận key nên không ghi thẳng được key ở đây.
+        const ipCell = meta && meta.ip
+          ? "<span class='keycell'>" + meta.ip + "</span> <span class='sub' style='display:inline'>(" + (meta.at || "") + ")</span>"
+          : "-";
         const tr = document.createElement("tr");
         tr.innerHTML =
           "<td class='keycell'>" + a.user + "<span class='copy' onclick=\"cp('" + a.user + "')\">copy</span></td>" +
-          "<td class='keycell'>" + a.pass + "<span class='copy' onclick=\"cp('" + a.pass + "')\">copy</span></td>";
+          "<td class='keycell'>" + a.pass + "<span class='copy' onclick=\"cp('" + a.pass + "')\">copy</span></td>" +
+          "<td>" + ipCell + "</td>";
         accBody.appendChild(tr);
       });
       tableEl.style.display = "table";

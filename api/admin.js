@@ -182,17 +182,26 @@ export default async function handler(req, res) {
         // tránh mất tài khoản khi nhiều người /login cùng lúc - xem
         // api/vangioi-config.js). PHẢI đọc đúng chỗ này, không thì hiện dữ liệu
         // cũ đóng băng từ trước lúc đổi cấu trúc.
-        const [accounts, extraLines, updatedAt] = await Promise.all([
+        const [accounts, extraLines, updatedAt, accountMetaRaw] = await Promise.all([
           redis.hgetall("vangioi_config:accounts"),
           redis.smembers("vangioi_config:extra_lines"),
-          redis.get("vangioi_config:updatedAt")
+          redis.get("vangioi_config:updatedAt"),
+          redis.hgetall("vangioi_config:account_meta")
         ]);
         if (!updatedAt) {
           return res.status(200).json({ ok: true, config: null, updatedAt: null });
         }
         const accLines = Object.entries(accounts || {}).map(([u, p]) => "acc=" + u + ":" + p);
         const config = [...(extraLines || []), ...accLines].join("\n");
-        return res.status(200).json({ ok: true, config, updatedAt });
+        // IP ghi lại lúc mod gửi config lên gần nhất cho từng account (xem
+        // api/vangioi-config.js) - endpoint đó không nhận key bản quyền nên không ghi
+        // thẳng được key, nhưng admin.html tự đối chiếu IP này với cột "Đang dùng (IP)"
+        // bên danh sách key để suy ra key tương ứng.
+        const accountMeta = {};
+        for (const [user, raw] of Object.entries(accountMetaRaw || {})) {
+          try { accountMeta[user] = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (e) { }
+        }
+        return res.status(200).json({ ok: true, config, updatedAt, accountMeta });
       }
 
       let record = await redis.get("config:main");

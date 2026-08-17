@@ -22,6 +22,18 @@ const redis = Redis.fromEnv();
 const ACCOUNTS_HASH = "vangioi_config:accounts"; // field = username, value = password
 const EXTRA_SET = "vangioi_config:extra_lines";  // các dòng khác (không phải acc=...) nếu có
 const UPDATED_AT_KEY = "vangioi_config:updatedAt";
+// field = username, value = JSON {ip, at} - IP request gửi config lên gần nhất cho
+// account đó. Endpoint này KHÔNG nhận key bản quyền (mod không gửi kèm) nên không
+// thể ghi thẳng "key nào gửi" - nhưng admin.html có thể tự đối chiếu IP này với cột
+// "Đang dùng (IP)" bên danh sách key (vangioi-check.js cũng ghi IP theo key) để suy
+// ra được key tương ứng, hoàn toàn không cần sửa gì bên mod.
+const ACCOUNT_META_HASH = "vangioi_config:account_meta";
+
+function getClientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (fwd) return String(fwd).split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
 
 // Tách text nhiều dòng "acc=user:pass" thành { accounts: {user:pass}, extraLines: [] }
 function parseConfigText(text) {
@@ -85,14 +97,20 @@ export default async function handler(req, res) {
   try {
     const { accounts, extraLines } = parseConfigText(config);
 
+    const ip = getClientIp(req);
+    const at = new Date().toISOString();
+
     const ops = [];
     if (Object.keys(accounts).length > 0) {
       ops.push(redis.hset(ACCOUNTS_HASH, accounts)); // ghi atomic, không đụng tài khoản khác
+      const meta = {};
+      for (const user of Object.keys(accounts)) meta[user] = JSON.stringify({ ip, at });
+      ops.push(redis.hset(ACCOUNT_META_HASH, meta));
     }
     for (const line of extraLines) {
       ops.push(redis.sadd(EXTRA_SET, line));
     }
-    ops.push(redis.set(UPDATED_AT_KEY, new Date().toISOString()));
+    ops.push(redis.set(UPDATED_AT_KEY, at));
 
     await Promise.all(ops);
   } catch (e) {
