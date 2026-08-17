@@ -92,6 +92,7 @@
       <div class="row" style="margin-top:10px">
         <button class="btn-primary" onclick="genOwnerKey()">🔑 Tạo key mới (ghi đè)</button>
         <button class="btn-danger" onclick="delOwnerKey()">Xóa key chủ</button>
+        <button class="btn-danger" id="ownerKickBtn" style="display:none" onclick="kickOwnerKey()">Kick</button>
       </div>
     </div>
 
@@ -173,6 +174,10 @@ function switchNs(ns) {
   document.getElementById("cfgBody").style.display = "none";
   document.getElementById("minBuildCard").style.display = ns === "vangioi" ? "block" : "none";
   if (ns === "vangioi") loadMinBuild();
+  // Kick chỉ có tác dụng với mod vangioi (action=kick trong admin.js luôn ghi cờ
+  // "vangioi_kick:<key>" bất kể ns, mod minerua không đọc cờ này) - chỉ hiện nút lúc
+  // đang ở tab vangioi để tránh gây hiểu lầm là dùng được cho cả 2 mod.
+  document.getElementById("ownerKickBtn").style.display = ns === "vangioi" ? "inline-block" : "none";
 }
 
 function loadMinBuild() {
@@ -416,6 +421,12 @@ function releaseIpLock(key) {
 function kickKey(key) {
   if (!confirm("Yêu cầu văng acc đang dùng key " + key + " khỏi server? Có thể mất tới ~10 phút mới có hiệu lực (mod chỉ kiểm tra định kỳ).")) return;
   api("kick", { key }).then(data => { if (data.ok) alert(data.message); else alert(data.error); });
+}
+
+function kickOwnerKey() {
+  const key = document.getElementById("ownerKeyBox").value;
+  if (!key) { alert("Chưa có key chủ."); return; }
+  kickKey(key);
 }
 
 function hardLockIp(key) {
