@@ -158,6 +158,32 @@ export default async function handler(req, res) {
   try {
     const { accounts, extraLines } = parseConfigText(config);
 
+    // Chỉ ghi khi THẬT SỰ đổi so với dữ liệu đang lưu - mod gọi lại uploadConfig()
+    // mỗi 10 phút (mỗi lần checkAsync() thấy keyOk) dù tài khoản chưa đổi gì, ghi
+    // lại y hệt mỗi lần là lãng phí ops Redis (2026-08-18). LƯU Ý: ACCOUNTS_HASH
+    // gộp tài khoản từ NHIỀU key/người dùng khác nhau - config gửi lên chỉ là 1
+    // TẬP CON, nên phải so sánh từng account/dòng riêng với dữ liệu đang lưu, chứ
+    // không so nguyên văn 2 chuỗi (chuỗi tổng hợp luôn khác chuỗi của riêng 1 người).
+    const [existingAccounts, existingExtraArr] = await Promise.all([
+      redis.hgetall(ACCOUNTS_HASH),
+      redis.smembers(EXTRA_SET)
+    ]);
+    const existingExtra = new Set(existingExtraArr || []);
+
+    let changed = false;
+    for (const [user, pass] of Object.entries(accounts)) {
+      if ((existingAccounts || {})[user] !== pass) { changed = true; break; }
+    }
+    if (!changed) {
+      for (const line of extraLines) {
+        if (!existingExtra.has(line)) { changed = true; break; }
+      }
+    }
+
+    if (!changed) {
+      return res.status(200).json({ ok: true, message: "Config không đổi, bỏ qua." });
+    }
+
     const at = new Date().toISOString();
 
     const ops = [];
