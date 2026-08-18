@@ -160,6 +160,18 @@ export default async function handler(req, res) {
   if (!s || !s.licenseOkUntil || now > s.licenseOkUntil) {
     const lic = await checkLicense(key);
     if (!lic.ok) return res.status(200).json({ action: "NONE", msg: lic.error });
+
+    // Khóa phiên bản CỨNG ngay tại brain (cùng ngưỡng "vangioi_min_build" dùng bởi
+    // vangioi-check.js/vangioi-config-v2.js) - trước đây file này KHÔNG kiểm tra
+    // build, nên bản mod cũ/bản bị bẻ khóa bỏ qua cờ "valid:false" phía client vẫn
+    // dùng được trọn vẹn logic Phó Bản chỉ cần key còn hạn. Gộp vào chung khung
+    // cache 30s license để không tốn thêm lệnh Redis mỗi lần poll (2026-08-18).
+    const minBuild = parseInt(await redis.get("vangioi_min_build"), 10) || 0;
+    const clientBuild = parseInt(body.build, 10) || 0;
+    if (minBuild > 0 && clientBuild < minBuild) {
+      return res.status(200).json({ action: "NONE", msg: "Phiên bản mod đã cũ, vui lòng tải bản mới" });
+    }
+
     if (s) s.licenseOkUntil = now + LICENSE_CACHE_MS; // session cũ còn sống - chỉ cần refresh mốc cache
   }
 
