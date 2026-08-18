@@ -161,6 +161,20 @@
       </table>
     </div>
 
+    <div class="card" id="chienDauTrackCard" style="display:none">
+      <h3>Người dùng bản Chiến Đấu (không key)</h3>
+      <div class="sub" style="margin-bottom:8px">
+        Bản rút gọn chỉ có tab Chiến Đấu, không có hệ thống key - tự báo IGN mỗi lần
+        vào server, IP lấy từ chính request đó.
+      </div>
+      <button class="btn-gray btn-small" onclick="loadChienDauTrack()">↻ Tải lại</button>
+      <div class="cfg-meta" id="chienDauTrackMeta">Chưa tải.</div>
+      <table id="chienDauTrackTable" style="display:none">
+        <thead><tr><th>Ingame</th><th>IP</th><th>Lần gần nhất</th></tr></thead>
+        <tbody id="chienDauTrackBody"></tbody>
+      </table>
+    </div>
+
   </div>
 </div>
 
@@ -197,6 +211,34 @@ function switchNs(ns) {
   document.getElementById("auditCard").style.display = ns === "vangioi" ? "block" : "none";
   document.getElementById("auditMeta").textContent = "Chưa chạy.";
   document.getElementById("auditTable").style.display = "none";
+  document.getElementById("chienDauTrackCard").style.display = ns === "vangioi" ? "block" : "none";
+  document.getElementById("chienDauTrackMeta").textContent = "Chưa tải.";
+  document.getElementById("chienDauTrackTable").style.display = "none";
+}
+
+function loadChienDauTrack() {
+  document.getElementById("chienDauTrackMeta").textContent = "Đang tải...";
+  api("getchiendautrack").then(data => {
+    if (!data.ok) { document.getElementById("chienDauTrackMeta").textContent = data.error || "Lỗi"; return; }
+    const tableEl = document.getElementById("chienDauTrackTable");
+    const body = document.getElementById("chienDauTrackBody");
+    body.innerHTML = "";
+    if (data.users.length === 0) {
+      document.getElementById("chienDauTrackMeta").textContent = "Chưa ghi nhận ai.";
+      tableEl.style.display = "none";
+      return;
+    }
+    data.users.forEach(u => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td class='keycell'>" + u.user + "<span class='copy' onclick=\"cp('" + u.user + "')\">copy</span></td>" +
+        "<td class='keycell'>" + (u.ip || "-") + "</td>" +
+        "<td>" + (u.at || "-") + "</td>";
+      body.appendChild(tr);
+    });
+    document.getElementById("chienDauTrackMeta").textContent = data.users.length + " người đã ghi nhận.";
+    tableEl.style.display = "table";
+  });
 }
 
 function runAudit() {

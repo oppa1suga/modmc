@@ -314,6 +314,18 @@ export default async function handler(req, res) {
       });
     }
 
+    // === XEM danh sách IGN + IP đã ghi nhận từ bản Chiến Đấu rút gọn (không key) ===
+    if (action === "getchiendautrack") {
+      const raw = await redis.hgetall("vangioi_chiendau_track:users");
+      const users = Object.entries(raw || {}).map(([user, v]) => {
+        let meta = v;
+        if (typeof meta === "string") { try { meta = JSON.parse(meta); } catch (e) { meta = null; } }
+        return { user, ip: meta?.ip || null, at: meta?.at || null };
+      });
+      users.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+      return res.status(200).json({ ok: true, users });
+    }
+
     return res.status(400).json({ ok: false, error: "action không hợp lệ" });
 
   } catch (e) {
