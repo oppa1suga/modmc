@@ -145,6 +145,22 @@
       <pre class="cfg" id="cfgBody" style="display:none">-</pre>
     </div>
 
+    <div class="card" id="auditCard" style="display:none">
+      <h3>Rà tài khoản nghi dùng mod không qua key</h3>
+      <div class="sub" style="margin-bottom:8px">
+        So account đã từng gửi config lên (chứng tỏ đang chạy mod) với danh sách account
+        đang/từng đứng tên 1 key hợp lệ. Account nào gửi config mà CHƯA TỪNG đứng tên key
+        nào là dấu hiệu khả nghi (có thể bản mod bị bẻ khóa bỏ qua bước kiểm tra key) -
+        không phải bằng chứng tuyệt đối, khách mới join lần đầu cũng có thể rơi vào diện này.
+      </div>
+      <button class="btn-primary btn-small" onclick="runAudit()">Rà ngay</button>
+      <div class="cfg-meta" id="auditMeta">Chưa chạy.</div>
+      <table id="auditTable" style="display:none">
+        <thead><tr><th>Ingame</th><th>IP lúc gửi config</th><th>Thời điểm</th></tr></thead>
+        <tbody id="auditBody"></tbody>
+      </table>
+    </div>
+
   </div>
 </div>
 
@@ -178,6 +194,36 @@ function switchNs(ns) {
   // "vangioi_kick:<key>" bất kể ns, mod minerua không đọc cờ này) - chỉ hiện nút lúc
   // đang ở tab vangioi để tránh gây hiểu lầm là dùng được cho cả 2 mod.
   document.getElementById("ownerKickBtn").style.display = ns === "vangioi" ? "inline-block" : "none";
+  document.getElementById("auditCard").style.display = ns === "vangioi" ? "block" : "none";
+  document.getElementById("auditMeta").textContent = "Chưa chạy.";
+  document.getElementById("auditTable").style.display = "none";
+}
+
+function runAudit() {
+  document.getElementById("auditMeta").textContent = "Đang rà...";
+  api("vangioiaudit").then(data => {
+    if (!data.ok) { document.getElementById("auditMeta").textContent = data.error || "Lỗi"; return; }
+    const tableEl = document.getElementById("auditTable");
+    const body = document.getElementById("auditBody");
+    body.innerHTML = "";
+    if (data.suspicious.length === 0) {
+      document.getElementById("auditMeta").textContent =
+        "Không có account nào khả nghi (" + data.totalAccounts + " account, " + data.knownIgNameCount + " đã từng đứng tên key hợp lệ).";
+      tableEl.style.display = "none";
+      return;
+    }
+    data.suspicious.forEach(s => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td class='keycell'>" + s.user + "<span class='copy' onclick=\"cp('" + s.user + "')\">copy</span></td>" +
+        "<td class='keycell'>" + (s.ip || "-") + "</td>" +
+        "<td>" + (s.at || "-") + "</td>";
+      body.appendChild(tr);
+    });
+    document.getElementById("auditMeta").textContent =
+      data.suspicious.length + " / " + data.totalAccounts + " account CHƯA TỪNG đứng tên key hợp lệ nào - kiểm tra thêm trước khi kết luận.";
+    tableEl.style.display = "table";
+  });
 }
 
 function loadMinBuild() {

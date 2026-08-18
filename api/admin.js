@@ -271,6 +271,49 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, minBuild: build });
     }
 
+    // === RÀ TÀI KHOẢN NGHI NGỜ DÙNG MOD KHÔNG QUA KEY HỢP LỆ (chỉ vangioi) ===
+    // AutoLoginMod tự gửi config (username/password) lên /api/vangioi-config MỖI LẦN
+    // vào server, KHÔNG cần key hợp lệ (endpoint đó không kiểm tra key) - nên nếu ai
+    // đó chạy bản mod bị bẻ khóa (bỏ qua bước gọi/kiểm tra vangioi-check), account của
+    // họ vẫn xuất hiện trong "vangioi_config:accounts" như bình thường. Ngược lại,
+    // "vangioi_iplock:<key>" chỉ được ghi SAU KHI qua được kiểm tra key thật
+    // (vangioi-check.js) và có igName kèm theo. Account nào từng gửi config lên mà
+    // CHƯA TỪNG đứng tên bất kỳ khóa IP nào là dấu hiệu khả nghi.
+    // LƯU Ý: không phải bằng chứng tuyệt đối - khách mới join lần đầu (chưa kịp có
+    // lock), hoặc gõ /login trước khi nhập key hợp lệ, cũng rơi vào diện này.
+    if (action === "vangioiaudit") {
+      const [accounts, accountMetaRaw, lockKeys] = await Promise.all([
+        redis.hgetall("vangioi_config:accounts"),
+        redis.hgetall("vangioi_config:account_meta"),
+        redis.keys("vangioi_iplock:*")
+      ]);
+
+      const knownIgNames = new Set();
+      if (lockKeys.length > 0) {
+        const locks = await redis.mget(...lockKeys);
+        lockKeys.forEach((k, i) => {
+          let lock = locks[i];
+          if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
+          if (lock && lock.igName) knownIgNames.add(lock.igName);
+        });
+      }
+
+      const suspicious = [];
+      for (const user of Object.keys(accounts || {})) {
+        if (knownIgNames.has(user)) continue;
+        let meta = (accountMetaRaw || {})[user];
+        if (typeof meta === "string") { try { meta = JSON.parse(meta); } catch (e) { meta = null; } }
+        suspicious.push({ user, ip: meta?.ip || null, at: meta?.at || null });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        suspicious,
+        totalAccounts: Object.keys(accounts || {}).length,
+        knownIgNameCount: knownIgNames.size
+      });
+    }
+
     return res.status(400).json({ ok: false, error: "action không hợp lệ" });
 
   } catch (e) {
