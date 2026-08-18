@@ -96,7 +96,7 @@ const ENTER_TIMEOUT_MS = 10000;
 const WAIT_GUI_TIMEOUT_MS = 3000;
 const GUI_CLOSE_TIMEOUT_MS = 3000;
 const SECOND_GUI_GRACE_MS = 500; // chỉ dùng cho mode team_leader (ESC GUI 2)
-const CLICK_DELAY_MS = 3000;
+const CLICK_DELAY_MS = 500;
 const REJECT_CD_MS = 10000;
 const NOGUI_CD_MS = 30000;
 
