@@ -65,7 +65,15 @@ const LICENSE_CACHE_MS = 30000;
 // đang tranh slot, an toàn tới ~4-5 người tranh CÙNG LÚC trước khi chạm trần
 // 100 ops/giây (dùng chung toàn hệ thống) của Redis Cloud free tier - xuống thấp
 // hơn nữa (VD 100ms) rủi ro chạm trần đúng lúc đang tranh slot đông người.
+//
+// Thử nghiệm 2026-08-19: hạ xuống 50ms (đã là sàn cứng vì client quy đổi ra
+// tick MC 20 TPS, Math.max(1, round(ms/50)) - dưới 50ms không còn tác dụng gì
+// thêm). Rủi ro chạm trần 100 ops/giây tăng gấp ~3 (chỉ cần ~2 người tranh cùng
+// lúc), nên có "cầu dao tự động" OVERLOAD_* bên dưới: tự phát hiện qua
+// `INFO stats` và tạm lùi về SAFE_FAST_POLL_MS nếu tải thật sự cao, không cần
+// người canh chừng.
 const FAST_POLL_MS = 50;
+const SAFE_FAST_POLL_MS = 150; // mốc đã biết an toàn, dùng khi cầu dao kích hoạt
 const SLOW_POLL_MS = 2000;
 // Riêng lúc IDLE mà cả 3 lệnh còn cooldown lâu (tới NOGUI_CD_MS = 30s) thì kéo
 // giãn xa hơn SLOW_POLL_MS nữa - hỏi mỗi 2s trong lúc chắc chắn còn 20-30s nữa
@@ -93,6 +101,42 @@ const REJECT_CD_MS = 10000;
 const NOGUI_CD_MS = 30000;
 
 const SESSION_TTL_SEC = 3600;
+
+// ===== Cầu dao tự động cho FAST_POLL_MS (2026-08-19) =====
+// Chỉ lấy mẫu `INFO stats` tối đa 1 lần/OVERLOAD_CHECK_INTERVAL_SEC (giành quyền
+// qua SET NX) - KHÔNG gọi INFO ở mọi request, tốn thêm ops vô ích. Khi
+// instantaneous_ops_per_sec vượt ngưỡng, bật cờ OVERLOAD_KEY (TTL ngắn, tự hết
+// nếu không được "làm mới" ở lần lấy mẫu kế) buộc mọi người tạm dùng lại mốc an
+// toàn SAFE_FAST_POLL_MS thay vì FAST_POLL_MS, tới khi tải hạ xuống.
+const OVERLOAD_KEY = "vangioi_phoban_overload";
+const OVERLOAD_CHECK_LOCK_KEY = "vangioi_phoban_overload_checklock";
+const OVERLOAD_CHECK_INTERVAL_SEC = 3;
+const OVERLOAD_OPS_THRESHOLD = 70; // dưới trần 100 ops/giây, chừa margin cho traffic khác
+const OVERLOAD_FLAG_TTL_SEC = 8;
+
+async function getEffectiveFastPollMs() {
+  try {
+    const gotLock = await redis.set(
+      OVERLOAD_CHECK_LOCK_KEY, "1", "EX", OVERLOAD_CHECK_INTERVAL_SEC, "NX"
+    );
+    if (gotLock) {
+      const info = await redis.info("stats");
+      const m = /instantaneous_ops_per_sec:(\d+)/.exec(info || "");
+      const opsPerSec = m ? parseInt(m[1], 10) : 0;
+      if (opsPerSec >= OVERLOAD_OPS_THRESHOLD) {
+        await redis.set(OVERLOAD_KEY, "1", "EX", OVERLOAD_FLAG_TTL_SEC);
+        return SAFE_FAST_POLL_MS;
+      }
+      return FAST_POLL_MS;
+    }
+    const overloaded = await redis.get(OVERLOAD_KEY);
+    return overloaded ? SAFE_FAST_POLL_MS : FAST_POLL_MS;
+  } catch (e) {
+    // Lỗi ở cầu dao không nên chặn luồng chính - lùi về mốc an toàn khi không
+    // chắc chắn tình trạng tải thật sự ra sao.
+    return SAFE_FAST_POLL_MS;
+  }
+}
 
 function dist(a, b) {
   const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
@@ -244,7 +288,9 @@ export default async function handler(req, res) {
     await redis.set(sessionKey, JSON.stringify(s), "EX", SESSION_TTL_SEC).catch(() => {});
     // team_mem hiện KHÔNG có client nào gọi (mem mode để local) - vẫn trả nextPollMs
     // cho đồng bộ hình dạng response, phòng sau này có ai dùng lại tới.
-    return res.status(200).json({ action, command: null, clickSlot, msg, nextPollMs: FAST_POLL_MS });
+    return res.status(200).json({
+      action, command: null, clickSlot, msg, nextPollMs: await getEffectiveFastPollMs()
+    });
   }
 
   function isFarFromHome(threshold) {
@@ -386,15 +432,16 @@ export default async function handler(req, res) {
       // chuyển phase rồi) - đợi tới đúng lúc lệnh gần nhất hết cooldown, không sớm
       // hơn (phí request) mà cũng không trễ hơn IDLE_MAX_POLL_MS (lỡ mất mốc bốc lệnh).
       const nearestGapMs = Math.min(...s.readyAt.map((r) => r - now));
-      nextPollMs = Math.max(FAST_POLL_MS, Math.min(IDLE_MAX_POLL_MS, nearestGapMs));
+      nextPollMs = Math.max(await getEffectiveFastPollMs(), Math.min(IDLE_MAX_POLL_MS, nearestGapMs));
       break;
     }
     // Đang chờ phản ứng gấp (GUI xác nhận xuất hiện/đóng, vừa xong 1 lượt) - cần
-    // phản hồi nhanh để tranh thời điểm.
+    // phản hồi nhanh để tranh thời điểm. Dùng mốc "hiệu lực" - cầu dao tự lùi về
+    // SAFE_FAST_POLL_MS nếu Redis đang tải cao (xem getEffectiveFastPollMs).
     case "WAIT_CONFIRM_GUI":
     case "WAIT_GUI_CLOSE":
     case "WAIT_AFTER_DONE":
-      nextPollMs = FAST_POLL_MS;
+      nextPollMs = await getEffectiveFastPollMs();
       break;
     // Đang chờ đổi dimension để coi là đã vào hầm - cửa sổ ngắn (ENTER_TIMEOUT_MS
     // chỉ 10s), cần đủ nhặt để không lỡ mốc đổi dimension trong chính 10s đó.
