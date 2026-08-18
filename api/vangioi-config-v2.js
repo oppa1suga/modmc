@@ -38,11 +38,15 @@ const UPDATED_AT_KEY = "vangioi_config:updatedAt";
 // key (vangioi-check.js cũng ghi IP theo key) để suy ra key tương ứng.
 const ACCOUNT_META_HASH = "vangioi_config:account_meta";
 
-// Rate limit + giới hạn dung lượng (thêm 2026-08-18 sau vụ endpoint bị lạm dụng) -
-// mỗi lần join chỉ gửi 1 lần nên 20 request/phút/IP đã rất dư dả cho dùng bình
-// thường (kể cả vài người chung mạng/router), nhưng đủ thấp để chặn spam.
-const RATE_LIMIT_PER_MIN = 20;
-const RATE_LIMIT_WINDOW_SEC = 60;
+// Rate limit + giới hạn dung lượng (thêm 2026-08-18 sau vụ endpoint bị lạm dụng).
+// Cửa sổ NGẮN (10s thay vì 60s như bản đầu) - Fixed Window cho phép dồn hết
+// nguyên hạn mức vào đúng giây đầu cửa sổ rồi mới chặn tiếp, nên cửa sổ càng dài
+// thì burst tối đa trong 1 giây càng lớn. Mỗi request (trường hợp ghi thật) tốn
+// ~6-8 lệnh Redis - 10 request/10s vẫn dư dả cho dùng bình thường (mỗi lần join
+// chỉ gửi 1 lần, kể cả vài người chung mạng/router) nhưng burst tối đa trong 1s
+// chỉ ~80 ops, an toàn dưới trần 100 ops/giây của Redis Cloud (2026-08-18).
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_SEC = 10;
 // 20KB - dư sức cho vài chục tài khoản (mỗi dòng "acc=user:pass" chỉ vài chục ký
 // tự), chặn được kiểu nhồi rác làm đầy 30MB free tier.
 const MAX_CONFIG_LENGTH = 20_000;
@@ -106,7 +110,7 @@ export default async function handler(req, res) {
   const ip = getClientIp(req);
 
   if (req.method === "GET") {
-    if (await isRateLimited(redis, "config-get", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key: req.query.key })) {
+    if (await isRateLimited(redis, "config-get", ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SEC, { key: req.query.key })) {
       return res.status(429).json({ ok: false, error: "Gọi quá nhanh, thử lại sau." });
     }
 
@@ -134,7 +138,7 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const config = body.config;
 
-  if (await isRateLimited(redis, "config-post", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key: body.key })) {
+  if (await isRateLimited(redis, "config-post", ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SEC, { key: body.key })) {
     return res.status(429).json({ ok: false, error: "Gọi quá nhanh, thử lại sau." });
   }
 

@@ -31,8 +31,11 @@ const EXTRA_SET = "vangioi_config:extra_lines";
 const UPDATED_AT_KEY = "vangioi_config:updatedAt";
 const ACCOUNT_META_HASH = "vangioi_config:account_meta";
 
-const RATE_LIMIT_PER_MIN = 20;
-const RATE_LIMIT_WINDOW_SEC = 60;
+// Cửa sổ ngắn (10s) thay vì dài (60s) - lý do y hệt vangioi-config-v2.js: Fixed
+// Window cho phép dồn hết hạn mức vào giây đầu cửa sổ, cửa sổ dài thì burst tối
+// đa trong 1s càng lớn, dễ vượt trần 100 ops/giây Redis Cloud (2026-08-18).
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_SEC = 10;
 const MAX_CONFIG_LENGTH = 20_000;
 
 function getClientIp(req) {
@@ -73,7 +76,7 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const config = body.config;
 
-  if (await isRateLimited(redis, "config-legacy", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, {})) {
+  if (await isRateLimited(redis, "config-legacy", ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_SEC, {})) {
     return res.status(429).json({ ok: false, error: "Gọi quá nhanh, thử lại sau." });
   }
 
