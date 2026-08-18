@@ -10,9 +10,9 @@
 // Trả về:   { kick: true/false }
 // Cờ tự xóa ngay khi đọc thấy (chỉ báo 1 LẦN, không lặp lại).
 
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./_redis.js";
 
-const redis = Redis.fromEnv();
+const redis = getRedis();
 
 export default async function handler(req, res) {
   const key = req.query.key;

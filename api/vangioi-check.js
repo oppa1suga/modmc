@@ -41,9 +41,9 @@
 // này mỗi 10 phút, kick có thể mất tới ~10 phút mới có hiệu lực (đánh đổi để không
 // tốn thêm lệnh Redis polling riêng - xem ghi chú ngân sách Redis trong project memory).
 
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./_redis.js";
 
-const redis = Redis.fromEnv();
+const redis = getRedis();
 
 const LEASE_TIMEOUT_MS = 12 * 60 * 1000; // 12 phút (dài hơn chu kỳ check 10 phút của mod)
 

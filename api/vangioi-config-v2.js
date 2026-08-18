@@ -23,8 +23,8 @@
 // Trả về: { ok: true, config, updatedAt } - "config" được dựng lại thành đúng
 // định dạng nhiều dòng "acc=user:pass" như cũ để không phải đổi gì bên mod.
 
-import { Redis } from "@upstash/redis";
-const redis = Redis.fromEnv();
+import { getRedis } from "./_redis.js";
+const redis = getRedis();
 
 const ACCOUNTS_HASH = "vangioi_config:accounts"; // field = username, value = password
 const EXTRA_SET = "vangioi_config:extra_lines";  // các dòng khác (không phải acc=...) nếu có

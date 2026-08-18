@@ -20,8 +20,8 @@
 // Tên lệnh phó bản, ngưỡng thời gian, máy trạng thái... đều nằm ở đây,
 // KHÔNG có trong client -> crack lấy được mod cũng không biết logic thật.
 
-import { Redis } from "@upstash/redis";
-const redis = Redis.fromEnv();
+import { getRedis } from "./_redis.js";
+const redis = getRedis();
 
 // ===== Bí mật (chỉ có trên server) =====
 const COMMANDS = [
@@ -166,7 +166,7 @@ export default async function handler(req, res) {
       }
     }
 
-    await redis.set(sessionKey, JSON.stringify(s), { ex: SESSION_TTL_SEC }).catch(() => {});
+    await redis.set(sessionKey, JSON.stringify(s), "EX", SESSION_TTL_SEC).catch(() => {});
     return res.status(200).json({ action, command: null, clickSlot, msg });
   }
 
@@ -297,7 +297,7 @@ export default async function handler(req, res) {
       s.phaseStart = now;
   }
 
-  await redis.set(sessionKey, JSON.stringify(s), { ex: SESSION_TTL_SEC }).catch(() => {});
+  await redis.set(sessionKey, JSON.stringify(s), "EX", SESSION_TTL_SEC).catch(() => {});
 
   return res.status(200).json({ action, command, clickSlot, msg });
 }

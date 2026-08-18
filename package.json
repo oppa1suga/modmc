@@ -4,6 +4,6 @@
   "description": "Server API cho mod minerua",
   "private": true,
   "dependencies": {
-    "@upstash/redis": "^1.34.0"
+    "ioredis": "^5.4.1"
   }
 }

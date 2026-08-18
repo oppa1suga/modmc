@@ -9,8 +9,8 @@
 // Lưu vào 1 Redis HASH, field = IGN, value = JSON {ip, at} - IP lấy từ chính
 // request này (không cần mod gửi kèm, giống getClientIp() ở các endpoint khác).
 
-import { Redis } from "@upstash/redis";
-const redis = Redis.fromEnv();
+import { getRedis } from "./_redis.js";
+const redis = getRedis();
 
 const TRACK_HASH = "vangioi_chiendau_track:users";
 

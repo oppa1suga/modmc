@@ -20,10 +20,10 @@
 //   ?action=vangioiaudit                      -> rà tài khoản nghi dùng mod không qua key hợp lệ
 //   ?action=getchiendautrack                  -> xem IGN+IP đã ghi nhận từ bản Chiến Đấu rút gọn (không key)
 
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./_redis.js";
 import { randomBytes } from "crypto";
 
-const redis = Redis.fromEnv();
+const redis = getRedis();
 
 // Mật khẩu admin lấy từ biến môi trường (KHÔNG viết cứng trong code)
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
