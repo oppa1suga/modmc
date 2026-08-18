@@ -43,7 +43,7 @@ function getClientIp(req) {
 // trước bao lâu, hỏi dồn dập mỗi 250ms vô ích, tốn ops/giây Redis Cloud).
 const FAST_POLL_MS = 250;        // giữ nguyên nhịp hiện tại cho giai đoạn cần phản ứng
 const SLOW_POLL_MS = 2000;       // WAIT_ENTER
-const LONG_WAIT_POLL_MS = 10000; // WAIT_RETURN (đang trong ải)
+const LONG_WAIT_POLL_MS = 60000; // WAIT_RETURN (đang trong ải) - ~1 phút, theo yêu cầu 2026-08-18
 
 // ===== Bí mật (chỉ có trên server) =====
 const EMERALD_SLOT = 31; // ô khối emerald trong GUI "Sảnh Thủ Thành"
