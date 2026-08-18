@@ -414,7 +414,17 @@ export default async function handler(req, res) {
     }
 
     case "WAIT_RETURN": {
-      const leftDungeonDim = s.dungeonDim && dim && dim !== s.dungeonDim;
+      // CHỈ coi là "rời phó bản" khi đã về ĐÚNG dimension nhà (homeDim), KHÔNG
+      // PHẢI cứ đổi khác dungeonDim là xong - phó bản (đặc biệt Team) có NHIỀU
+      // dimension nội bộ (sảnh chờ -> bosszone -> có thể còn zone khác) trong
+      // CÙNG 1 lượt, s.dungeonDim chỉ ghi nhận đúng 1 lần lúc mới vào (WAIT_ENTER)
+      // nên hễ đổi sang dimension nội bộ KHÁC (VD lobby -> bosszone) là bị hiểu
+      // nhầm "đã xong", quay IDLE gửi lệnh mới NGAY GIỮA lúc đang đánh (bug thật,
+      // phát hiện qua log "Bạn không thể làm điều đó khi đang trong PHÓ BẢN" lặp
+      // lại liên tục - 2026-08-19). Giữ điều kiện phụ bằng dimension nhà (không
+      // chỉ dựa khoảng cách) để vẫn bắt được trường hợp lượt xong trả về SAI vị
+      // trí ban đầu nhưng ĐÚNG dimension nhà.
+      const leftDungeonDim = s.dungeonDim && dim && dim !== s.dungeonDim && dim === s.homeDim;
       const backNearHome = !isFarFromHome(POS_RETURN_THRESHOLD);
       if (leftDungeonDim || backNearHome) {
         s.homePos = null;
