@@ -114,7 +114,24 @@ const OVERLOAD_CHECK_INTERVAL_SEC = 3;
 const OVERLOAD_OPS_THRESHOLD = 70; // dưới trần 100 ops/giây, chừa margin cho traffic khác
 const OVERLOAD_FLAG_TTL_SEC = 8;
 
+// Cache kết quả ở BIẾN CẤP MODULE - DÙNG CHUNG cho mọi session/request cùng chạy
+// trên 1 instance serverless đang "ấm" (y hệt cách _redis.js cache sẵn client
+// Redis) - thay vì mỗi session tự lưu/hỏi riêng. Bản đầu tiên của cầu dao này (dù
+// đã né được lệnh INFO nặng bằng SET NX) vẫn khiến MỖI poll tốn thêm 1-2 lệnh
+// Redis phụ (SET NX thử khóa + có thể thêm GET cờ) - ở mốc 50ms, 1 người tranh
+// slot một mình đã gần chạm trần 100 ops/giây chỉ vì overhead của chính cầu dao.
+// Giờ CẢ HỆ THỐNG (mọi session) dùng chung đúng 1 cache, chỉ thật sự hỏi Redis
+// mỗi OVERLOAD_CHECK_INTERVAL_SEC giây MỘT LẦN (không phải mỗi session, càng
+// không phải mỗi poll) - phản ứng quá tải vẫn trong ~3s như cũ, rẻ hơn hẳn so
+// với cache theo từng session riêng lẻ (2026-08-19, sửa sau khi rà code phiên trước).
+let cachedOverload = { until: 0, checkedAt: 0 };
+
 async function getEffectiveFastPollMs() {
+  const now = Date.now();
+  if (now - cachedOverload.checkedAt < OVERLOAD_CHECK_INTERVAL_SEC * 1000) {
+    return cachedOverload.until > now ? SAFE_FAST_POLL_MS : FAST_POLL_MS;
+  }
+  cachedOverload.checkedAt = now;
   try {
     const gotLock = await redis.set(
       OVERLOAD_CHECK_LOCK_KEY, "1", "EX", OVERLOAD_CHECK_INTERVAL_SEC, "NX"
@@ -125,15 +142,19 @@ async function getEffectiveFastPollMs() {
       const opsPerSec = m ? parseInt(m[1], 10) : 0;
       if (opsPerSec >= OVERLOAD_OPS_THRESHOLD) {
         await redis.set(OVERLOAD_KEY, "1", "EX", OVERLOAD_FLAG_TTL_SEC);
+        cachedOverload.until = now + OVERLOAD_FLAG_TTL_SEC * 1000;
         return SAFE_FAST_POLL_MS;
       }
+      cachedOverload.until = 0;
       return FAST_POLL_MS;
     }
     const overloaded = await redis.get(OVERLOAD_KEY);
+    cachedOverload.until = overloaded ? now + OVERLOAD_FLAG_TTL_SEC * 1000 : 0;
     return overloaded ? SAFE_FAST_POLL_MS : FAST_POLL_MS;
   } catch (e) {
     // Lỗi ở cầu dao không nên chặn luồng chính - lùi về mốc an toàn khi không
     // chắc chắn tình trạng tải thật sự ra sao.
+    cachedOverload.until = now + OVERLOAD_FLAG_TTL_SEC * 1000;
     return SAFE_FAST_POLL_MS;
   }
 }
