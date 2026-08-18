@@ -150,7 +150,13 @@ export default async function handler(req, res) {
     if (action === "delete") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
-      await redis.del(PREFIX + key);
+      // Dọn luôn bản ghi khóa IP đi kèm - trước đây chỉ xóa key bản quyền, để lại
+      // "vangioi_iplock:<key>" mồ côi trong database mãi mãi (2026-08-18, phát
+      // hiện qua việc thấy số bản ghi iplock nhiều hơn số key thật).
+      await Promise.all([
+        redis.del(PREFIX + key),
+        redis.del("vangioi_iplock:" + key)
+      ]);
       return res.status(200).json({ ok: true, message: "Đã xóa key " + key });
     }
 
