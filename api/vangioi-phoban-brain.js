@@ -34,12 +34,20 @@ function getClientIp(req) {
   return req.socket?.remoteAddress || "unknown";
 }
 
-// Client gọi mỗi ~250ms/người khi đang bật (xem comment đầu file) - 1 người dùng
-// bình thường ra ~240 request/phút. Đặt ngưỡng cao (đủ chỗ cho ~5-6 người CHUNG 1
-// IP/router cùng bật) để không chặn nhầm người dùng thật, chỉ chặn khi có gì đó gọi
-// nhanh bất thường (VD lỗi lặp vô hạn, hoặc spam cố ý) (thêm 2026-08-18).
-const RATE_LIMIT_PER_MIN = 1500;
+// Client gọi mỗi ~150ms/người khi đang bật (tăng tốc 2026-08-18 để tranh slot phó
+// bản - xem LICENSE_CACHE_MS bù lại số lệnh Redis) - 1 người dùng bình thường ra
+// ~400 request/phút. Đặt ngưỡng cao (đủ chỗ cho ~6 người CHUNG 1 IP/router cùng
+// bật) để không chặn nhầm người dùng thật, chỉ chặn khi có gì đó gọi nhanh bất
+// thường (VD lỗi lặp vô hạn, hoặc spam cố ý).
+const RATE_LIMIT_PER_MIN = 2500;
 const RATE_LIMIT_WINDOW_SEC = 60;
+
+// Cache kết quả kiểm tra bản quyền - bản quyền HIẾM KHI đổi giữa 2 lần poll liên
+// tiếp (150ms), check lại (2 lệnh GET: owner_key + license) mỗi lần là lãng phí
+// ngân sách ops/giây của Redis Cloud (100 ops/s) một cách không cần thiết. Chỉ
+// check lại sau mỗi 30s - đủ nhanh để phát hiện key hết hạn/bị xóa mà không tốn
+// quá nhiều lệnh, giải phóng ngân sách để tăng tốc polling (2026-08-18).
+const LICENSE_CACHE_MS = 30000;
 
 // ===== Bí mật (chỉ có trên server) =====
 const COMMANDS = [
@@ -112,9 +120,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ action: "NONE" });
   }
 
-  const lic = await checkLicense(key);
-  if (!lic.ok) return res.status(200).json({ action: "NONE", msg: lic.error });
-
   let s;
   try {
     s = await redis.get(sessionKey);
@@ -124,6 +129,13 @@ export default async function handler(req, res) {
   if (typeof s === "string") { try { s = JSON.parse(s); } catch (e) { s = null; } }
 
   const now = Date.now();
+
+  if (!s || !s.licenseOkUntil || now > s.licenseOkUntil) {
+    const lic = await checkLicense(key);
+    if (!lic.ok) return res.status(200).json({ action: "NONE", msg: lic.error });
+    if (s) s.licenseOkUntil = now + LICENSE_CACHE_MS; // session cũ còn sống - chỉ cần refresh mốc cache
+  }
+
   if (!s) {
     s = {
       phase: "IDLE",
@@ -136,7 +148,8 @@ export default async function handler(req, res) {
       phaseStart: now,
       guiSeenAt: null,
       posGraceStart: now,
-      escMsgSent: false
+      escMsgSent: false,
+      licenseOkUntil: now + LICENSE_CACHE_MS
     };
   }
 
