@@ -21,6 +21,11 @@ const redis = getRedis();
 const RATE_LIMIT_PER_MIN = 60;
 const RATE_LIMIT_WINDOW_SEC = 60;
 
+// Chặn payload bất thường (giống MAX_CONFIG_LENGTH của vangioi-config-v2) - key
+// thật rất ngắn, giá trị dài bất thường chỉ có thể cố tình nhồi query string
+// (2026-08-18).
+const MAX_KEY_LENGTH = 200;
+
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
   if (fwd) return String(fwd).split(",")[0].trim();
@@ -31,6 +36,9 @@ export default async function handler(req, res) {
   const key = req.query.key;
   if (!key) {
     return res.status(400).json({ kick: false, error: "Thiếu key" });
+  }
+  if (key.length > MAX_KEY_LENGTH) {
+    return res.status(400).json({ kick: false, error: "Dữ liệu không hợp lệ" });
   }
 
   const ip = getClientIp(req);

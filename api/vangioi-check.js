@@ -54,6 +54,11 @@ const LEASE_TIMEOUT_MS = 12 * 60 * 1000; // 12 phút (dài hơn chu kỳ check 1
 const RATE_LIMIT_PER_MIN = 30;
 const RATE_LIMIT_WINDOW_SEC = 60;
 
+// Chặn payload bất thường (giống MAX_CONFIG_LENGTH của vangioi-config-v2) - key/
+// user/session thật đều rất ngắn, giá trị dài bất thường chỉ có thể là cố tình
+// nhồi query string để lãng phí băng thông/bộ nhớ Redis (2026-08-18).
+const MAX_FIELD_LENGTH = 200;
+
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
   if (fwd) return String(fwd).split(",")[0].trim();
@@ -68,9 +73,16 @@ function parseJson(v) {
 
 export default async function handler(req, res) {
   const key = req.query.key;
+  const userParam = req.query.user;
+  const sessionParam = req.query.session;
 
   if (!key) {
     return res.status(400).json({ valid: false, reason: "Thiếu key" });
+  }
+  if (key.length > MAX_FIELD_LENGTH
+      || (typeof userParam === "string" && userParam.length > MAX_FIELD_LENGTH)
+      || (typeof sessionParam === "string" && sessionParam.length > MAX_FIELD_LENGTH)) {
+    return res.status(400).json({ valid: false, reason: "Dữ liệu không hợp lệ" });
   }
 
   const ip = getClientIp(req);
