@@ -1,5 +1,6 @@
 // api/vangioi-config-v2.js
-// Nhận config của AutoLoginMod (vangioi) và lưu vào database (Upstash Redis).
+// Nhận config của AutoLoginMod (vangioi) và lưu vào database Redis Cloud (chuyển
+// từ Upstash Redis ngày 2026-08-18, xem api/_redis.js).
 // BẮT BUỘC key bản quyền hợp lệ (đổi từ "không cần key" ngày 2026-08-18 - endpoint
 // mở KHÔNG xác thực bị nghi lạm dụng, gọi liên tục ~1.7 req/s suốt ~107 phút, góp
 // phần lớn làm tràn quota lệnh Redis).

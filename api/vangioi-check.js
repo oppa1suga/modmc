@@ -1,5 +1,6 @@
 // api/vangioi-check.js
-// Kiểm tra key bản quyền của mod VANGIOI - đọc từ database Upstash Redis.
+// Kiểm tra key bản quyền của mod VANGIOI - đọc từ database Redis Cloud (chuyển
+// từ Upstash Redis ngày 2026-08-18, xem api/_redis.js).
 // Namespace riêng ("vangioi_license:") để không lẫn với key của mod minerua.
 //
 // Mod gọi:  https://server-minerua.vercel.app/api/vangioi-check?key=XXXX
