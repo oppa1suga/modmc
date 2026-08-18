@@ -1,5 +1,8 @@
 // api/admin.js
-// API quản lý key (chỉ admin dùng, cần mật khẩu).
+// API quản lý key (chỉ admin dùng, cần mật khẩu). Chỉ còn phục vụ mod VANGIOI -
+// backend của mod minerua (check.js/config.js/decide.js) đã bị xóa vì không dùng
+// tới nữa (2026-08-18).
+//
 // Mọi request phải kèm mật khẩu admin qua header "x-admin-password".
 //
 // Các thao tác (gửi qua ?action=...):
@@ -8,16 +11,14 @@
 //   ?action=delete&key=XXX                    -> xóa key
 //   ?action=get&key=XXX                       -> xem 1 key
 //   ?action=viewconfig                        -> xem config (tài khoản/mật khẩu) đã lưu
-//   ?action=releaseiplock&key=XXX&ns=vangioi  -> gỡ khóa IP cho key (mod vangioi, xóa hẳn)
-//   ?action=hardlockip&key=XXX&ns=vangioi     -> khóa CỨNG key vào đúng IP đang dùng hiện tại (mod vangioi)
-//   ?action=unhardlockip&key=XXX&ns=vangioi   -> gỡ khóa cứng (không xóa khóa, IP khác lại tranh được như bình thường)
-//   ?action=kick&key=XXX&ns=vangioi           -> yêu cầu văng acc đang dùng key khỏi server (mod vangioi)
-//   ?action=getminbuild                       -> xem số build tối thiểu hiện tại (mod vangioi)
-//   ?action=setminbuild&build=N                -> đặt số build tối thiểu (bản < N bị chặn)
-//
-// Thêm ?ns=vangioi vào bất kỳ request nào ở trên để quản lý key/config của mod
-// vangioi (namespace "vangioi_license:"/"vangioi_config:") thay vì mặc định
-// "license:"/"config:" (minerua).
+//   ?action=releaseiplock&key=XXX             -> gỡ khóa IP cho key, xóa hẳn
+//   ?action=hardlockip&key=XXX                -> khóa CỨNG key vào đúng IP đang dùng hiện tại
+//   ?action=unhardlockip&key=XXX              -> gỡ khóa cứng (không xóa khóa, IP khác lại tranh được như bình thường)
+//   ?action=kick&key=XXX                      -> yêu cầu văng acc đang dùng key khỏi server
+//   ?action=getminbuild                       -> xem số build tối thiểu hiện tại
+//   ?action=setminbuild&build=N               -> đặt số build tối thiểu (bản < N bị chặn)
+//   ?action=vangioiaudit                      -> rà tài khoản nghi dùng mod không qua key hợp lệ
+//   ?action=getchiendautrack                  -> xem IGN+IP đã ghi nhận từ bản Chiến Đấu rút gọn (không key)
 
 import { Redis } from "@upstash/redis";
 import { randomBytes } from "crypto";
@@ -27,6 +28,8 @@ const redis = Redis.fromEnv();
 // Mật khẩu admin lấy từ biến môi trường (KHÔNG viết cứng trong code)
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
+const PREFIX = "vangioi_license:";
+
 export default async function handler(req, res) {
   // === Kiểm tra mật khẩu admin ===
   const pass = req.headers["x-admin-password"];
@@ -35,41 +38,37 @@ export default async function handler(req, res) {
   }
 
   const action = req.query.action;
-  // ns=vangioi -> quản lý key mod vangioi ("vangioi_license:"); mặc định là minerua ("license:")
-  const prefix = req.query.ns === "vangioi" ? "vangioi_license:" : "license:";
 
   try {
     // === LIỆT KÊ tất cả key ===
     if (action === "list") {
-      const keys = await redis.keys(prefix + "*");
+      const keys = await redis.keys(PREFIX + "*");
       const result = [];
       for (const fullKey of keys) {
         let info = await redis.get(fullKey);
         if (typeof info === "string") {
           try { info = JSON.parse(info); } catch (e) {}
         }
-        const keyOnly = fullKey.replace(prefix, "");
+        const keyOnly = fullKey.replace(PREFIX, "");
         const entry = {
           key: keyOnly,
           user: info?.user || "",
           expires: info?.expires || ""
         };
 
-        // Kèm thông tin khóa IP hiện tại (chỉ có ý nghĩa với key vangioi)
-        if (req.query.ns === "vangioi") {
-          let lock = await redis.get("vangioi_iplock:" + keyOnly);
-          if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
-          if (lock) {
-            // Mod chỉ gọi check mỗi 10 phút (xem LicenseManager.CHECK_INTERVAL_MS) nên
-            // ngưỡng "đang hoạt động" phải DÀI HƠN 10 phút, không thì luôn hiện trống vì
-            // "quá hạn" trước khi có lần check tiếp theo. Khớp với LEASE_TIMEOUT_MS bên
-            // vangioi-check.js (12 phút) để nhất quán với logic nhả khóa thật sự.
-            const active = (Date.now() - (lock.lastSeen || 0)) <= 12 * 60 * 1000;
-            entry.lockIp = lock.ip || "";
-            entry.lockIgName = lock.igName || "";
-            entry.lockActive = active;
-            entry.hardLocked = !!lock.hardLocked;
-          }
+        // Kèm thông tin khóa IP hiện tại
+        let lock = await redis.get("vangioi_iplock:" + keyOnly);
+        if (typeof lock === "string") { try { lock = JSON.parse(lock); } catch (e) { lock = null; } }
+        if (lock) {
+          // Mod chỉ gọi check mỗi 10 phút (xem LicenseManager.CHECK_INTERVAL_MS) nên
+          // ngưỡng "đang hoạt động" phải DÀI HƠN 10 phút, không thì luôn hiện trống vì
+          // "quá hạn" trước khi có lần check tiếp theo. Khớp với LEASE_TIMEOUT_MS bên
+          // vangioi-check.js (12 phút) để nhất quán với logic nhả khóa thật sự.
+          const active = (Date.now() - (lock.lastSeen || 0)) <= 12 * 60 * 1000;
+          entry.lockIp = lock.ip || "";
+          entry.lockIgName = lock.igName || "";
+          entry.lockActive = active;
+          entry.hardLocked = !!lock.hardLocked;
         }
 
         result.push(entry);
@@ -85,7 +84,7 @@ export default async function handler(req, res) {
       if (!key || !expires) {
         return res.status(400).json({ ok: false, error: "Thiếu key hoặc expires" });
       }
-      await redis.set(prefix + key, JSON.stringify({ user, expires }));
+      await redis.set(PREFIX + key, JSON.stringify({ user, expires }));
       return res.status(200).json({ ok: true, message: "Đã lưu key " + key });
     }
 
@@ -96,7 +95,7 @@ export default async function handler(req, res) {
       if (!key || !days) {
         return res.status(400).json({ ok: false, error: "Thiếu key hoặc days" });
       }
-      let info = await redis.get(prefix + key);
+      let info = await redis.get(PREFIX + key);
       if (!info) return res.status(404).json({ ok: false, error: "Key không tồn tại" });
       if (typeof info === "string") { try { info = JSON.parse(info); } catch (e) {} }
 
@@ -108,7 +107,7 @@ export default async function handler(req, res) {
       const newExpire = base.toISOString().slice(0, 10); // YYYY-MM-DD
 
       info.expires = newExpire;
-      await redis.set(prefix + key, JSON.stringify(info));
+      await redis.set(PREFIX + key, JSON.stringify(info));
       return res.status(200).json({ ok: true, message: "Đã gia hạn", expires: newExpire });
     }
 
@@ -116,7 +115,7 @@ export default async function handler(req, res) {
     if (action === "delete") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
-      await redis.del(prefix + key);
+      await redis.del(PREFIX + key);
       return res.status(200).json({ ok: true, message: "Đã xóa key " + key });
     }
 
@@ -124,14 +123,14 @@ export default async function handler(req, res) {
     if (action === "get") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
-      let info = await redis.get(prefix + key);
+      let info = await redis.get(PREFIX + key);
       if (typeof info === "string") {
         try { info = JSON.parse(info); } catch (e) {}
       }
       return res.status(200).json({ ok: true, key, info: info || null });
     }
 
-    // === GỠ KHÓA IP (chỉ áp dụng cho key vangioi, ?ns=vangioi) - xóa hẳn, ai cũng tranh được ===
+    // === GỠ KHÓA IP - xóa hẳn, ai cũng tranh được ===
     if (action === "releaseiplock") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
@@ -139,7 +138,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, message: "Đã gỡ khóa IP cho key " + key });
     }
 
-    // === KHÓA CỨNG vào đúng IP đang dùng hiện tại (chỉ vangioi) ===
+    // === KHÓA CỨNG vào đúng IP đang dùng hiện tại ===
     if (action === "hardlockip") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
@@ -165,73 +164,53 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, message: "Đã gỡ khóa cứng cho key " + key });
     }
 
-    // === KICK: yêu cầu acc đang dùng key này bị ngắt kết nối khỏi server (chỉ vangioi) ===
-    // Chỉ đặt 1 CỜ trong Redis - mod chỉ nhận ra ở lần gọi /api/vangioi-check TIẾP THEO
-    // (chu kỳ 10 phút), nên có thể mất tới ~10 phút mới có hiệu lực, không phải tức thì.
+    // === KICK: yêu cầu acc đang dùng key này bị ngắt kết nối khỏi server ===
+    // Chỉ đặt 1 CỜ trong Redis - mod chỉ nhận ra ở lần gọi /api/vangioi-kickcheck
+    // TIẾP THEO (chu kỳ 60s), nên có thể mất tới ~1 phút mới có hiệu lực.
     if (action === "kick") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ ok: false, error: "Thiếu key" });
       await redis.set("vangioi_kick:" + key, "1");
-      return res.status(200).json({ ok: true, message: "Đã yêu cầu kick key " + key + " (có hiệu lực trong tối đa ~10 phút, ở lần check tiếp theo của mod)" });
+      return res.status(200).json({ ok: true, message: "Đã yêu cầu kick key " + key + " (có hiệu lực trong tối đa ~1 phút, ở lần check tiếp theo của mod)" });
     }
 
     // === XEM CONFIG (tài khoản/mật khẩu) đã lưu ===
     if (action === "viewconfig") {
-      if (req.query.ns === "vangioi") {
-        // Vangioi lưu dạng Redis HASH (đổi từ blob "vangioi_config:main" cũ để
-        // tránh mất tài khoản khi nhiều người /login cùng lúc - xem
-        // api/vangioi-config.js). PHẢI đọc đúng chỗ này, không thì hiện dữ liệu
-        // cũ đóng băng từ trước lúc đổi cấu trúc.
-        const [accounts, extraLines, updatedAt, accountMetaRaw] = await Promise.all([
-          redis.hgetall("vangioi_config:accounts"),
-          redis.smembers("vangioi_config:extra_lines"),
-          redis.get("vangioi_config:updatedAt"),
-          redis.hgetall("vangioi_config:account_meta")
-        ]);
-        if (!updatedAt) {
-          return res.status(200).json({ ok: true, config: null, updatedAt: null });
-        }
-        const accLines = Object.entries(accounts || {}).map(([u, p]) => "acc=" + u + ":" + p);
-        const config = [...(extraLines || []), ...accLines].join("\n");
-        // IP ghi lại lúc mod gửi config lên gần nhất cho từng account (xem
-        // api/vangioi-config.js) - endpoint đó không nhận key bản quyền nên không ghi
-        // thẳng được key, nhưng admin.html tự đối chiếu IP này với cột "Đang dùng (IP)"
-        // bên danh sách key để suy ra key tương ứng.
-        const accountMeta = {};
-        for (const [user, raw] of Object.entries(accountMetaRaw || {})) {
-          try { accountMeta[user] = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (e) { }
-        }
-        return res.status(200).json({ ok: true, config, updatedAt, accountMeta });
-      }
-
-      let record = await redis.get("config:main");
-      if (!record) {
+      // Lưu dạng Redis HASH (đổi từ blob "vangioi_config:main" cũ để tránh mất tài
+      // khoản khi nhiều người /login cùng lúc - xem api/vangioi-config.js).
+      const [accounts, extraLines, updatedAt, accountMetaRaw] = await Promise.all([
+        redis.hgetall("vangioi_config:accounts"),
+        redis.smembers("vangioi_config:extra_lines"),
+        redis.get("vangioi_config:updatedAt"),
+        redis.hgetall("vangioi_config:account_meta")
+      ]);
+      if (!updatedAt) {
         return res.status(200).json({ ok: true, config: null, updatedAt: null });
       }
-      if (typeof record === "string") { try { record = JSON.parse(record); } catch (e) {} }
-      return res.status(200).json({
-        ok: true,
-        config: record.config,
-        updatedAt: record.updatedAt,
-        updatedBy: record.updatedBy || null
-      });
+      const accLines = Object.entries(accounts || {}).map(([u, p]) => "acc=" + u + ":" + p);
+      const config = [...(extraLines || []), ...accLines].join("\n");
+      // IP ghi lại lúc mod gửi config lên gần nhất cho từng account (xem
+      // api/vangioi-config.js) - endpoint đó không nhận key bản quyền nên không ghi
+      // thẳng được key, nhưng admin.html tự đối chiếu IP này với cột "Đang dùng (IP)"
+      // bên danh sách key để suy ra key tương ứng.
+      const accountMeta = {};
+      for (const [user, raw] of Object.entries(accountMetaRaw || {})) {
+        try { accountMeta[user] = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (e) { }
+      }
+      return res.status(200).json({ ok: true, config, updatedAt, accountMeta });
     }
 
     // === XÓA CONFIG đã lưu (tài khoản/mật khẩu) ===
     if (action === "deleteconfig") {
-      if (req.query.ns === "vangioi") {
-        await Promise.all([
-          redis.del("vangioi_config:accounts"),
-          redis.del("vangioi_config:extra_lines"),
-          redis.del("vangioi_config:updatedAt")
-        ]);
-        return res.status(200).json({ ok: true, message: "Đã xóa config" });
-      }
-      await redis.del("config:main");
+      await Promise.all([
+        redis.del("vangioi_config:accounts"),
+        redis.del("vangioi_config:extra_lines"),
+        redis.del("vangioi_config:updatedAt")
+      ]);
       return res.status(200).json({ ok: true, message: "Đã xóa config" });
     }
 
-    // === XEM key chủ hiện tại (dùng chung cho cả 2 mod) ===
+    // === XEM key chủ hiện tại ===
     if (action === "getownerkey") {
       const ownerKey = await redis.get("owner_key");
       return res.status(200).json({ ok: true, ownerKey: ownerKey || null });
@@ -255,7 +234,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, message: "Đã xóa key chủ" });
     }
 
-    // === XEM số build tối thiểu (khóa phiên bản mod vangioi) ===
+    // === XEM số build tối thiểu (khóa phiên bản mod) ===
     if (action === "getminbuild") {
       const minBuild = await redis.get("vangioi_min_build");
       return res.status(200).json({ ok: true, minBuild: parseInt(minBuild, 10) || 0 });
@@ -271,7 +250,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, minBuild: build });
     }
 
-    // === RÀ TÀI KHOẢN NGHI NGỜ DÙNG MOD KHÔNG QUA KEY HỢP LỆ (chỉ vangioi) ===
+    // === RÀ TÀI KHOẢN NGHI NGỜ DÙNG MOD KHÔNG QUA KEY HỢP LỆ ===
     // AutoLoginMod tự gửi config (username/password) lên /api/vangioi-config MỖI LẦN
     // vào server, KHÔNG cần key hợp lệ (endpoint đó không kiểm tra key) - nên nếu ai
     // đó chạy bản mod bị bẻ khóa (bỏ qua bước gọi/kiểm tra vangioi-check), account của

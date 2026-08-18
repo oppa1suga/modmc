@@ -47,10 +47,6 @@
   .err { color: #f77; font-size: 13px; margin-top: 8px; }
   .copy { cursor: pointer; color: #6ac; margin-left: 6px; font-size: 11px; }
   .search { margin-bottom: 10px; }
-  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
-  .tab { padding: 8px 16px; border-radius: 8px; border: 1px solid #2a3550; background: #1a2234;
-    color: #8892a6; cursor: pointer; font-weight: 600; font-size: 13px; }
-  .tab.active { background: #2a7; color: #fff; border-color: #2a7; }
   pre.cfg { background: #0f1420; border: 1px solid #212c44; border-radius: 8px; padding: 12px;
     white-space: pre-wrap; word-break: break-all; font-size: 12px; color: #cdd; max-height: 300px;
     overflow-y: auto; }
@@ -78,13 +74,8 @@
   <!-- Quản lý -->
   <div id="mainBox" style="display:none">
 
-    <div class="tabs">
-      <div class="tab active" id="tabMinerua" onclick="switchNs('minerua')">Minerua</div>
-      <div class="tab" id="tabVangioi" onclick="switchNs('vangioi')">Vangioi</div>
-    </div>
-
     <div class="card">
-      <h3>Key chủ (dùng chung cho cả 2 mod, không hết hạn)</h3>
+      <h3>Key chủ (không hết hạn)</h3>
       <div class="row">
         <input id="ownerKeyBox" readonly placeholder="Chưa có key chủ" style="flex:1; font-family:monospace">
         <span class="copy" onclick="cpOwnerKey()" style="font-size:13px">copy</span>
@@ -92,12 +83,12 @@
       <div class="row" style="margin-top:10px">
         <button class="btn-primary" onclick="genOwnerKey()">🔑 Tạo key mới (ghi đè)</button>
         <button class="btn-danger" onclick="delOwnerKey()">Xóa key chủ</button>
-        <button class="btn-danger" id="ownerKickBtn" style="display:none" onclick="kickOwnerKey()">Kick</button>
+        <button class="btn-danger" onclick="kickOwnerKey()">Kick</button>
       </div>
     </div>
 
-    <div class="card" id="minBuildCard" style="display:none">
-      <h3>Khóa phiên bản mod (Vangioi)</h3>
+    <div class="card">
+      <h3>Khóa phiên bản mod</h3>
       <div class="sub" style="margin-bottom:8px">Bản mod có số build NHỎ HƠN số dưới đây sẽ bị chặn, buộc người dùng tải bản mới. Số build lấy từ hằng số MOD_BUILD trong LicenseManager.java của mod.</div>
       <div class="row">
         <input id="minBuildBox" type="number" min="0" placeholder="Số build tối thiểu (0 = không khóa)" style="flex:1">
@@ -115,7 +106,7 @@
     <div class="card">
       <h3>Thêm key mới</h3>
       <div class="row">
-        <input id="newKey" placeholder="Key (vd MINERUA-ABC-123)">
+        <input id="newKey" placeholder="Key (vd VANGIOI-ABC-123)">
         <input id="newUser" placeholder="Tên khách">
         <input id="newExpire" type="date">
         <button class="btn-primary" onclick="addKey()">Thêm</button>
@@ -145,7 +136,7 @@
       <pre class="cfg" id="cfgBody" style="display:none">-</pre>
     </div>
 
-    <div class="card" id="auditCard" style="display:none">
+    <div class="card">
       <h3>Rà tài khoản nghi dùng mod không qua key</h3>
       <div class="sub" style="margin-bottom:8px">
         So account đã từng gửi config lên (chứng tỏ đang chạy mod) với danh sách account
@@ -161,7 +152,7 @@
       </table>
     </div>
 
-    <div class="card" id="chienDauTrackCard" style="display:none">
+    <div class="card">
       <h3>Người dùng bản Chiến Đấu (không key)</h3>
       <div class="sub" style="margin-bottom:8px">
         Bản rút gọn chỉ có tab Chiến Đấu, không có hệ thống key - tự báo IGN mỗi lần
@@ -181,7 +172,6 @@
 <script>
 let adminPass = "";
 let allKeys = [];
-let currentNs = "minerua"; // "minerua" | "vangioi"
 
 function togglePass() {
   const p = document.getElementById("pass");
@@ -189,31 +179,9 @@ function togglePass() {
 }
 
 function api(action, params = {}) {
-  let url = "/api/admin?action=" + action + "&ns=" + currentNs;
+  let url = "/api/admin?action=" + action;
   for (const k in params) url += "&" + k + "=" + encodeURIComponent(params[k]);
   return fetch(url, { headers: { "x-admin-password": adminPass } }).then(r => r.json());
-}
-
-function switchNs(ns) {
-  currentNs = ns;
-  document.getElementById("tabMinerua").classList.toggle("active", ns === "minerua");
-  document.getElementById("tabVangioi").classList.toggle("active", ns === "vangioi");
-  loadKeys();
-  document.getElementById("cfgMeta").textContent = "Chưa tải.";
-  document.getElementById("cfgTable").style.display = "none";
-  document.getElementById("cfgBody").style.display = "none";
-  document.getElementById("minBuildCard").style.display = ns === "vangioi" ? "block" : "none";
-  if (ns === "vangioi") loadMinBuild();
-  // Kick chỉ có tác dụng với mod vangioi (action=kick trong admin.js luôn ghi cờ
-  // "vangioi_kick:<key>" bất kể ns, mod minerua không đọc cờ này) - chỉ hiện nút lúc
-  // đang ở tab vangioi để tránh gây hiểu lầm là dùng được cho cả 2 mod.
-  document.getElementById("ownerKickBtn").style.display = ns === "vangioi" ? "inline-block" : "none";
-  document.getElementById("auditCard").style.display = ns === "vangioi" ? "block" : "none";
-  document.getElementById("auditMeta").textContent = "Chưa chạy.";
-  document.getElementById("auditTable").style.display = "none";
-  document.getElementById("chienDauTrackCard").style.display = ns === "vangioi" ? "block" : "none";
-  document.getElementById("chienDauTrackMeta").textContent = "Chưa tải.";
-  document.getElementById("chienDauTrackTable").style.display = "none";
 }
 
 function loadChienDauTrack() {
@@ -293,6 +261,7 @@ function login() {
       allKeys = data.keys;
       renderKeys();
       loadOwnerKey();
+      loadMinBuild();
     } else {
       document.getElementById("loginErr").textContent = data.error || "Sai mật khẩu";
     }
@@ -397,7 +366,7 @@ function loadConfig() {
 }
 
 function deleteConfig() {
-  if (!confirm("Xóa toàn bộ config (tài khoản/mật khẩu) đã lưu của " + currentNs + "?")) return;
+  if (!confirm("Xóa toàn bộ config (tài khoản/mật khẩu) đã lưu?")) return;
   api("deleteconfig").then(data => {
     if (data.ok) {
       document.getElementById("cfgMeta").textContent = "Đã xóa.";
@@ -433,13 +402,13 @@ function renderKeys() {
     else badge = "<span class='badge b-ok'>" + d + " ngày</span>";
 
     let usingCell = "-";
-    if (currentNs === "vangioi" && k.lockActive) {
+    if (k.lockActive) {
       usingCell = "<span class='badge b-ok'>" + (k.lockIgName || "?") + "</span> "
         + "<span class='keycell'>" + (k.lockIp || "") + "</span>"
         + (k.hardLocked ? " <span class='badge b-warn'>🔒 khóa cứng</span>" : "");
     }
 
-    const hasLock = currentNs === "vangioi" && !!k.lockIp;
+    const hasLock = !!k.lockIp;
     const hardLockBtn = k.hardLocked
       ? "<button class='btn-blue btn-small' onclick=\"unhardLockIp('" + k.key + "')\">Gỡ khóa cứng</button> "
       : "<button class='btn-gray btn-small' onclick=\"hardLockIp('" + k.key + "')\""
@@ -457,13 +426,11 @@ function renderKeys() {
         "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',30)\">+30</button>" +
       "</td>" +
       "<td>" +
-        (currentNs === "vangioi"
-          ? "<button class='btn-gray btn-small' onclick=\"releaseIpLock('" + k.key + "')\">Gỡ IP</button> "
-            + hardLockBtn
-            + "<button class='btn-danger btn-small' onclick=\"kickKey('" + k.key + "')\""
-            + (k.lockActive ? "" : " disabled title='Không có ai đang dùng key này'") + ">Kick</button> "
-          : "") +
-        "<button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button>" +
+        "<button class='btn-gray btn-small' onclick=\"releaseIpLock('" + k.key + "')\">Gỡ IP</button> "
+        + hardLockBtn
+        + "<button class='btn-danger btn-small' onclick=\"kickKey('" + k.key + "')\""
+        + (k.lockActive ? "" : " disabled title='Không có ai đang dùng key này'") + ">Kick</button> "
+        + "<button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button>" +
       "</td>";
     body.appendChild(tr);
   });
