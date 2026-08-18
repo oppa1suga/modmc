@@ -180,17 +180,6 @@
       </table>
     </div>
 
-    <div class="card">
-      <h3>Di chuyển dữ liệu từ Upstash cũ</h3>
-      <div class="sub" style="margin-bottom:8px">
-        Chạy 1 lần sau khi đổi sang Redis Cloud - sao chép key/config/owner key/track
-        từ database Upstash cũ (Vercel còn giữ sẵn biến môi trường của tích hợp cũ)
-        sang database mới. An toàn chạy lại nhiều lần (ghi đè, không xóa gì).
-      </div>
-      <button class="btn-primary btn-small" onclick="runMigrate()">Di chuyển ngay</button>
-      <div class="cfg-meta" id="migrateMeta">Chưa chạy.</div>
-    </div>
-
   </div>
 </div>
 
@@ -257,22 +246,6 @@ function loadAbuseLog() {
     });
     document.getElementById("abuseLogMeta").textContent = data.entries.length + " lần bị chặn gần nhất.";
     tableEl.style.display = "table";
-  });
-}
-
-function runMigrate() {
-  if (!confirm("Di chuyển dữ liệu từ Upstash cũ sang database mới? An toàn chạy nhiều lần (ghi đè theo key, không xóa gì).")) return;
-  document.getElementById("migrateMeta").textContent = "Đang di chuyển...";
-  api("migratefromupstash").then(data => {
-    if (!data.ok) { document.getElementById("migrateMeta").textContent = data.error || "Lỗi"; return; }
-    const s = data.summary;
-    let txt = "Xong: " + s.license + " key, " + s.iplock + " iplock, " + s.accounts + " account, "
-        + s.accountMeta + " account_meta, " + s.extraLines + " extra_lines, " + s.chienDauTrack + " chien_dau_track"
-        + ", owner_key=" + (s.ownerKey ? "có" : "không") + ", min_build=" + (s.minBuild ? "có" : "không") + ".";
-    if (s.errors && s.errors.length > 0) txt += " Lỗi ghi: " + s.errors.join("; ");
-    if (s.oldDbErrors && s.oldDbErrors.length > 0) txt += " Lỗi đọc DB cũ: " + s.oldDbErrors.join("; ");
-    document.getElementById("migrateMeta").textContent = txt;
-    loadKeys();
   });
 }
 
