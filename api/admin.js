@@ -21,7 +21,8 @@
 //   ?action=getchiendautrack                  -> xem IGN+IP đã ghi nhận từ bản Chiến Đấu rút gọn (không key)
 
 import { getRedis } from "./_redis.js";
-import { randomBytes } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
+import { isRateLimited } from "./_ratelimit.js";
 
 const redis = getRedis();
 
@@ -30,10 +31,38 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 const PREFIX = "vangioi_license:";
 
+// Chưa từng có rate limit ở đây - ai cũng thử mật khẩu admin bao nhiêu lần tùy ý
+// (dò brute-force). 20/phút/IP vẫn dư sức gõ nhầm vài lần, nhưng đủ thấp để dò
+// brute-force trở nên bất khả thi trong thời gian hợp lý (2026-08-18).
+const RATE_LIMIT_PER_MIN = 20;
+const RATE_LIMIT_WINDOW_SEC = 60;
+
+function getClientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (fwd) return String(fwd).split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
+
+// So sánh CONSTANT-TIME - "!==" thường có thể bị đo thời gian phản hồi để dò mật
+// khẩu từng ký tự (timing attack), dù rất khó khai thác qua mạng internet vẫn nên
+// tránh (2026-08-18).
+function passwordMatches(input) {
+  if (!ADMIN_PASSWORD || typeof input !== "string") return false;
+  const a = Buffer.from(input);
+  const b = Buffer.from(ADMIN_PASSWORD);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 export default async function handler(req, res) {
+  const ip = getClientIp(req);
+  if (await isRateLimited(redis, "admin-auth", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, {})) {
+    return res.status(429).json({ ok: false, error: "Thử lại quá nhanh, chờ 1 phút." });
+  }
+
   // === Kiểm tra mật khẩu admin ===
   const pass = req.headers["x-admin-password"];
-  if (!ADMIN_PASSWORD || pass !== ADMIN_PASSWORD) {
+  if (!passwordMatches(pass)) {
     return res.status(401).json({ ok: false, error: "Sai mật khẩu admin" });
   }
 
@@ -83,6 +112,12 @@ export default async function handler(req, res) {
       const expires = req.query.expires;
       if (!key || !expires) {
         return res.status(400).json({ ok: false, error: "Thiếu key hoặc expires" });
+      }
+      // "expires" không parse được thành ngày hợp lệ -> new Date(expires).getTime()
+      // ở vangioi-check.js ra NaN, mà "NaN <= 0" luôn là false trong JS -> key sẽ
+      // KHÔNG BAO GIỜ bị coi là hết hạn thay vì báo lỗi rõ ràng ở đây (2026-08-18).
+      if (isNaN(new Date(expires).getTime())) {
+        return res.status(400).json({ ok: false, error: "Ngày hết hạn không hợp lệ" });
       }
       await redis.set(PREFIX + key, JSON.stringify({ user, expires }));
       return res.status(200).json({ ok: true, message: "Đã lưu key " + key });

@@ -187,6 +187,44 @@
 let adminPass = "";
 let allKeys = [];
 
+// ===== Dựng DOM AN TOÀN (không dùng innerHTML với dữ liệu từ server) =====
+// Nhiều trường hiển thị ở đây (IGN, IP, key gửi kèm request bị chặn, mật khẩu tài
+// khoản...) là dữ liệu người dùng/kẻ tấn công TỰ GỬI LÊN qua các endpoint công
+// khai (VD vangioi-track.js không cần key), rồi được admin.html render lại. Trước
+// đây dùng "tr.innerHTML = '<td>' + value + '</td>'" - value chứa HTML/script sẽ
+// CHẠY THẲNG trong trình duyệt admin (stored XSS), có thể đánh cắp adminPass đang
+// lưu ở sessionStorage -> chiếm toàn quyền admin. Sửa 2026-08-18: luôn dùng
+// textContent cho dữ liệu, và dùng closure (không nhúng chuỗi vào onclick) cho
+// hành động trên nút bấm.
+function makeTd(text, cls) {
+  const t = document.createElement("td");
+  if (cls) t.className = cls;
+  t.textContent = text;
+  return t;
+}
+function makeCopySpan(value) {
+  const s = document.createElement("span");
+  s.className = "copy";
+  s.textContent = "copy";
+  s.onclick = () => cp(value);
+  return s;
+}
+function makeBadge(text, cls) {
+  const b = document.createElement("span");
+  b.className = "badge " + cls;
+  b.textContent = text;
+  return b;
+}
+function makeBtn(text, cls, onclick, opts = {}) {
+  const b = document.createElement("button");
+  b.className = cls;
+  b.textContent = text;
+  b.onclick = onclick;
+  if (opts.disabled) b.disabled = true;
+  if (opts.title) b.title = opts.title;
+  return b;
+}
+
 function togglePass() {
   const p = document.getElementById("pass");
   p.type = p.type === "password" ? "text" : "password";
@@ -212,10 +250,11 @@ function loadChienDauTrack() {
     }
     data.users.forEach(u => {
       const tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td class='keycell'>" + u.user + "<span class='copy' onclick=\"cp('" + u.user + "')\">copy</span></td>" +
-        "<td class='keycell'>" + (u.ip || "-") + "</td>" +
-        "<td>" + (u.at || "-") + "</td>";
+      const tdUser = makeTd(u.user, "keycell");
+      tdUser.appendChild(makeCopySpan(u.user));
+      tr.appendChild(tdUser);
+      tr.appendChild(makeTd(u.ip || "-", "keycell"));
+      tr.appendChild(makeTd(u.at || "-"));
       body.appendChild(tr);
     });
     document.getElementById("chienDauTrackMeta").textContent = data.users.length + " người đã ghi nhận.";
@@ -237,11 +276,12 @@ function loadAbuseLog() {
     }
     data.entries.forEach(e => {
       const tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td class='keycell'>" + (e.bucket || "-") + "</td>" +
-        "<td class='keycell'>" + (e.ip || "-") + "<span class='copy' onclick=\"cp('" + (e.ip || "") + "')\">copy</span></td>" +
-        "<td class='keycell'>" + (e.key || "-") + "</td>" +
-        "<td>" + (e.at || "-") + "</td>";
+      tr.appendChild(makeTd(e.bucket || "-", "keycell"));
+      const tdIp = makeTd(e.ip || "-", "keycell");
+      tdIp.appendChild(makeCopySpan(e.ip || ""));
+      tr.appendChild(tdIp);
+      tr.appendChild(makeTd(e.key || "-", "keycell"));
+      tr.appendChild(makeTd(e.at || "-"));
       body.appendChild(tr);
     });
     document.getElementById("abuseLogMeta").textContent = data.entries.length + " lần bị chặn gần nhất.";
@@ -264,10 +304,11 @@ function runAudit() {
     }
     data.suspicious.forEach(s => {
       const tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td class='keycell'>" + s.user + "<span class='copy' onclick=\"cp('" + s.user + "')\">copy</span></td>" +
-        "<td class='keycell'>" + (s.ip || "-") + "</td>" +
-        "<td>" + (s.at || "-") + "</td>";
+      const tdUser = makeTd(s.user, "keycell");
+      tdUser.appendChild(makeCopySpan(s.user));
+      tr.appendChild(tdUser);
+      tr.appendChild(makeTd(s.ip || "-", "keycell"));
+      tr.appendChild(makeTd(s.at || "-"));
       body.appendChild(tr);
     });
     document.getElementById("auditMeta").textContent =
@@ -378,17 +419,30 @@ function loadConfig() {
       accBody.innerHTML = "";
       accounts.forEach(a => {
         const meta = accountMeta[a.user];
+        const tr = document.createElement("tr");
+        const tdUser = makeTd(a.user, "keycell");
+        tdUser.appendChild(makeCopySpan(a.user));
+        tr.appendChild(tdUser);
+        const tdPass = makeTd(a.pass, "keycell");
+        tdPass.appendChild(makeCopySpan(a.pass));
+        tr.appendChild(tdPass);
         // IP lúc mod gửi config lên gần nhất cho account này - đối chiếu với cột
         // "Đang dùng (IP)" bên danh sách key (tab Key) để suy ra key tương ứng, vì
         // endpoint gửi config không nhận key nên không ghi thẳng được key ở đây.
-        const ipCell = meta && meta.ip
-          ? "<span class='keycell'>" + meta.ip + "</span> <span class='sub' style='display:inline'>(" + (meta.at || "") + ")</span>"
-          : "-";
-        const tr = document.createElement("tr");
-        tr.innerHTML =
-          "<td class='keycell'>" + a.user + "<span class='copy' onclick=\"cp('" + a.user + "')\">copy</span></td>" +
-          "<td class='keycell'>" + a.pass + "<span class='copy' onclick=\"cp('" + a.pass + "')\">copy</span></td>" +
-          "<td>" + ipCell + "</td>";
+        const tdIp = document.createElement("td");
+        if (meta && meta.ip) {
+          const ipSpan = document.createElement("span");
+          ipSpan.className = "keycell";
+          ipSpan.textContent = meta.ip;
+          const atSpan = document.createElement("span");
+          atSpan.className = "sub";
+          atSpan.style.display = "inline";
+          atSpan.textContent = " (" + (meta.at || "") + ")";
+          tdIp.append(ipSpan, atSpan);
+        } else {
+          tdIp.textContent = "-";
+        }
+        tr.appendChild(tdIp);
         accBody.appendChild(tr);
       });
       tableEl.style.display = "table";
@@ -436,42 +490,63 @@ function renderKeys() {
     // Lọc tìm kiếm
     if (q && !(k.key.toLowerCase().includes(q) || (k.user||"").toLowerCase().includes(q))) return;
 
-    let badge;
-    if (d < 0) badge = "<span class='badge b-exp'>Hết hạn</span>";
-    else if (d < 3) badge = "<span class='badge b-warn'>" + d + " ngày</span>";
-    else badge = "<span class='badge b-ok'>" + d + " ngày</span>";
+    const tr = document.createElement("tr");
 
-    let usingCell = "-";
+    const tdKey = makeTd(k.key, "keycell");
+    tdKey.appendChild(makeCopySpan(k.key));
+    tr.appendChild(tdKey);
+
+    tr.appendChild(makeTd(k.user || ""));
+    tr.appendChild(makeTd(k.expires));
+
+    const tdBadge = document.createElement("td");
+    if (d < 0) tdBadge.appendChild(makeBadge("Hết hạn", "b-exp"));
+    else if (d < 3) tdBadge.appendChild(makeBadge(d + " ngày", "b-warn"));
+    else tdBadge.appendChild(makeBadge(d + " ngày", "b-ok"));
+    tr.appendChild(tdBadge);
+
+    const tdUsing = document.createElement("td");
     if (k.lockActive) {
-      usingCell = "<span class='badge b-ok'>" + (k.lockIgName || "?") + "</span> "
-        + "<span class='keycell'>" + (k.lockIp || "") + "</span>"
-        + (k.hardLocked ? " <span class='badge b-warn'>🔒 khóa cứng</span>" : "");
+      tdUsing.appendChild(makeBadge(k.lockIgName || "?", "b-ok"));
+      tdUsing.appendChild(document.createTextNode(" "));
+      const ipSpan = document.createElement("span");
+      ipSpan.className = "keycell";
+      ipSpan.textContent = k.lockIp || "";
+      tdUsing.appendChild(ipSpan);
+      if (k.hardLocked) {
+        tdUsing.appendChild(document.createTextNode(" "));
+        tdUsing.appendChild(makeBadge("🔒 khóa cứng", "b-warn"));
+      }
+    } else {
+      tdUsing.textContent = "-";
     }
+    tr.appendChild(tdUsing);
+
+    const tdRenew = document.createElement("td");
+    tdRenew.appendChild(makeBtn("+7", "btn-blue btn-small", () => renew(k.key, 7)));
+    tdRenew.appendChild(document.createTextNode(" "));
+    tdRenew.appendChild(makeBtn("+30", "btn-blue btn-small", () => renew(k.key, 30)));
+    tr.appendChild(tdRenew);
 
     const hasLock = !!k.lockIp;
-    const hardLockBtn = k.hardLocked
-      ? "<button class='btn-blue btn-small' onclick=\"unhardLockIp('" + k.key + "')\">Gỡ khóa cứng</button> "
-      : "<button class='btn-gray btn-small' onclick=\"hardLockIp('" + k.key + "')\""
-        + (hasLock ? "" : " disabled title='Chưa có ai dùng key này để khóa'") + ">Khóa IP</button> ";
+    const tdActions = document.createElement("td");
+    tdActions.appendChild(makeBtn("Gỡ IP", "btn-gray btn-small", () => releaseIpLock(k.key)));
+    tdActions.appendChild(document.createTextNode(" "));
+    if (k.hardLocked) {
+      tdActions.appendChild(makeBtn("Gỡ khóa cứng", "btn-blue btn-small", () => unhardLockIp(k.key)));
+    } else {
+      tdActions.appendChild(makeBtn("Khóa IP", "btn-gray btn-small", () => hardLockIp(k.key), {
+        disabled: !hasLock, title: hasLock ? undefined : "Chưa có ai dùng key này để khóa"
+      }));
+    }
+    tdActions.appendChild(document.createTextNode(" "));
+    tdActions.appendChild(makeBtn("Kick", "btn-danger btn-small", () => kickKey(k.key), {
+      disabled: !k.lockActive, title: k.lockActive ? undefined : "Không có ai đang dùng key này"
+    }));
+    tdActions.appendChild(document.createTextNode(" "));
+    tdActions.appendChild(makeBtn("Xóa", "btn-danger btn-small", () => delKey(k.key)));
+    tr.appendChild(tdActions);
 
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      "<td class='keycell'>" + k.key + "<span class='copy' onclick=\"cp('" + k.key + "')\">copy</span></td>" +
-      "<td>" + (k.user||"") + "</td>" +
-      "<td>" + k.expires + "</td>" +
-      "<td>" + badge + "</td>" +
-      "<td>" + usingCell + "</td>" +
-      "<td>" +
-        "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',7)\">+7</button> " +
-        "<button class='btn-blue btn-small' onclick=\"renew('" + k.key + "',30)\">+30</button>" +
-      "</td>" +
-      "<td>" +
-        "<button class='btn-gray btn-small' onclick=\"releaseIpLock('" + k.key + "')\">Gỡ IP</button> "
-        + hardLockBtn
-        + "<button class='btn-danger btn-small' onclick=\"kickKey('" + k.key + "')\""
-        + (k.lockActive ? "" : " disabled title='Không có ai đang dùng key này'") + ">Kick</button> "
-        + "<button class='btn-danger btn-small' onclick=\"delKey('" + k.key + "')\">Xóa</button>" +
-      "</td>";
     body.appendChild(tr);
   });
 
