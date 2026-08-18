@@ -1,8 +1,13 @@
-// api/vangioi-config.js
+// api/vangioi-config-v2.js
 // Nhận config của AutoLoginMod (vangioi) và lưu vào database (Upstash Redis).
 // BẮT BUỘC key bản quyền hợp lệ (đổi từ "không cần key" ngày 2026-08-18 - endpoint
 // mở KHÔNG xác thực bị nghi lạm dụng, gọi liên tục ~1.7 req/s suốt ~107 phút, góp
 // phần lớn làm tràn quota lệnh Redis).
+//
+// ĐỔI ĐƯỜNG DẪN từ "vangioi-config" sang "vangioi-config-v2" CÙNG lúc thêm key bắt
+// buộc (2026-08-18) - file cũ đã XÓA HẲN (404) nên bất kỳ client nào (bản cũ, bản
+// crack, bot dò URL cũ...) đang hardcode URL cũ sẽ không gọi được nữa, kể cả nếu nó
+// có key hợp lệ trong tay. Client hiện tại (build 4 trở lên) đã trỏ sang URL này.
 //
 // Mod gửi (POST, body JSON):
 //   { "key": "<KEY bản quyền>", "config": <nội dung file autologin_accounts.txt> }
@@ -14,7 +19,7 @@
 // giờ mỗi tài khoản ghi độc lập nên không còn tranh chấp nữa.
 //
 // Xem lại config đã lưu (GET):
-//   https://server-minerua.vercel.app/api/vangioi-config?key=<KEY bản quyền>
+//   https://server-minerua.vercel.app/api/vangioi-config-v2?key=<KEY bản quyền>
 // Trả về: { ok: true, config, updatedAt } - "config" được dựng lại thành đúng
 // định dạng nhiều dòng "acc=user:pass" như cũ để không phải đổi gì bên mod.
 
