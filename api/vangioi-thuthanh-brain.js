@@ -59,6 +59,16 @@ const SESSION_TTL_SEC = 3600;
 const RATE_LIMIT_PER_MIN = 1500; // cùng ngưỡng phoban-brain (~250ms/lần = ~240/phút/người)
 const RATE_LIMIT_WINDOW_SEC = 60;
 
+// Chặn payload bất thường - key thật rất ngắn, giá trị dài bất thường chỉ có thể
+// cố tình nhồi body (2026-08-18, đồng bộ với các endpoint khác đã vá).
+const MAX_KEY_LENGTH = 200;
+
+// Cache kết quả kiểm tra bản quyền 30s - bản quyền HIẾM KHI đổi giữa 2 lần poll
+// liên tiếp (~250ms), check lại (2 lệnh GET) mỗi lần là lãng phí ops Redis không
+// cần thiết. Y hệt LICENSE_CACHE_MS bên vangioi-phoban-brain.js, trước đây file
+// này bị bỏ sót không áp dụng (2026-08-18).
+const LICENSE_CACHE_MS = 30000;
+
 async function checkLicense(key) {
   if (!key) return { ok: false, error: "Thiếu key" };
   const ownerKey = await redis.get("owner_key").catch(() => null);
@@ -87,6 +97,10 @@ export default async function handler(req, res) {
   const key = body.key;
   const sessionKey = "vangioi_thuthanh_session:" + key;
 
+  if (typeof key === "string" && key.length > MAX_KEY_LENGTH) {
+    return res.status(400).json({ action: "NONE" });
+  }
+
   const ip = getClientIp(req);
   if (await isRateLimited(redis, "thuthanh", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key })) {
     return res.status(429).json({ action: "NONE", msg: "Gọi quá nhanh, thử lại sau." });
@@ -100,9 +114,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ action: "NONE" });
   }
 
-  const lic = await checkLicense(key);
-  if (!lic.ok) return res.status(200).json({ action: "NONE", msg: lic.error });
-
   let s;
   try {
     s = await redis.get(sessionKey);
@@ -112,6 +123,13 @@ export default async function handler(req, res) {
   if (typeof s === "string") { try { s = JSON.parse(s); } catch (e) { s = null; } }
 
   const now = Date.now();
+
+  if (!s || !s.licenseOkUntil || now > s.licenseOkUntil) {
+    const lic = await checkLicense(key);
+    if (!lic.ok) return res.status(200).json({ action: "NONE", msg: lic.error });
+    if (s) s.licenseOkUntil = now + LICENSE_CACHE_MS; // session cũ còn sống - chỉ cần refresh mốc cache
+  }
+
   if (!s) {
     s = {
       phase: "IDLE",
@@ -119,7 +137,8 @@ export default async function handler(req, res) {
       idleGuiSeenAt: null,
       guiReadySeenAt: null,
       homeDim: null,
-      stageDim: null
+      stageDim: null,
+      licenseOkUntil: now + LICENSE_CACHE_MS
     };
   }
 

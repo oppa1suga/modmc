@@ -42,6 +42,11 @@ function getClientIp(req) {
 const RATE_LIMIT_PER_MIN = 2500;
 const RATE_LIMIT_WINDOW_SEC = 60;
 
+// Chặn payload bất thường - key thật rất ngắn, giá trị dài bất thường chỉ có thể
+// cố tình nhồi body (2026-08-18, đồng bộ với các endpoint khác đã vá - file này
+// trước đó bị bỏ sót).
+const MAX_KEY_LENGTH = 200;
+
 // Cache kết quả kiểm tra bản quyền - bản quyền HIẾM KHI đổi giữa 2 lần poll liên
 // tiếp (150ms), check lại (2 lệnh GET: owner_key + license) mỗi lần là lãng phí
 // ngân sách ops/giây của Redis Cloud (100 ops/s) một cách không cần thiết. Chỉ
@@ -120,6 +125,10 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const key = body.key;
+
+  if (typeof key === "string" && key.length > MAX_KEY_LENGTH) {
+    return res.status(400).json({ action: "NONE" });
+  }
 
   const ip = getClientIp(req);
   if (await isRateLimited(redis, "phoban", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key })) {
