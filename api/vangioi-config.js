@@ -1,9 +1,11 @@
 // api/vangioi-config.js
 // Nhận config của AutoLoginMod (vangioi) và lưu vào database (Upstash Redis).
-// KHÔNG yêu cầu key bản quyền (tạm thời) - ai gọi được URL cũng gửi/đọc được.
+// BẮT BUỘC key bản quyền hợp lệ (đổi từ "không cần key" ngày 2026-08-18 - endpoint
+// mở KHÔNG xác thực bị nghi lạm dụng, gọi liên tục ~1.7 req/s suốt ~107 phút, góp
+// phần lớn làm tràn quota lệnh Redis).
 //
 // Mod gửi (POST, body JSON):
-//   { "config": <nội dung file autologin_accounts.txt> }
+//   { "key": "<KEY bản quyền>", "config": <nội dung file autologin_accounts.txt> }
 //
 // LƯU Ý QUAN TRỌNG: mỗi tài khoản là 1 field riêng trong 1 Redis HASH
 // ("vangioi_config:accounts"), ghi bằng HSET - đây là thao tác ATOMIC của Redis,
@@ -12,7 +14,7 @@
 // giờ mỗi tài khoản ghi độc lập nên không còn tranh chấp nữa.
 //
 // Xem lại config đã lưu (GET):
-//   https://server-minerua.vercel.app/api/vangioi-config
+//   https://server-minerua.vercel.app/api/vangioi-config?key=<KEY bản quyền>
 // Trả về: { ok: true, config, updatedAt } - "config" được dựng lại thành đúng
 // định dạng nhiều dòng "acc=user:pass" như cũ để không phải đổi gì bên mod.
 
@@ -23,16 +25,31 @@ const ACCOUNTS_HASH = "vangioi_config:accounts"; // field = username, value = pa
 const EXTRA_SET = "vangioi_config:extra_lines";  // các dòng khác (không phải acc=...) nếu có
 const UPDATED_AT_KEY = "vangioi_config:updatedAt";
 // field = username, value = JSON {ip, at} - IP request gửi config lên gần nhất cho
-// account đó. Endpoint này KHÔNG nhận key bản quyền (mod không gửi kèm) nên không
-// thể ghi thẳng "key nào gửi" - nhưng admin.html có thể tự đối chiếu IP này với cột
-// "Đang dùng (IP)" bên danh sách key (vangioi-check.js cũng ghi IP theo key) để suy
-// ra được key tương ứng, hoàn toàn không cần sửa gì bên mod.
+// account đó. admin.html tự đối chiếu IP này với cột "Đang dùng (IP)" bên danh sách
+// key (vangioi-check.js cũng ghi IP theo key) để suy ra key tương ứng.
 const ACCOUNT_META_HASH = "vangioi_config:account_meta";
 
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
   if (fwd) return String(fwd).split(",")[0].trim();
   return req.socket?.remoteAddress || "unknown";
+}
+
+async function checkLicense(key) {
+  if (!key) return false;
+
+  const ownerKey = await redis.get("owner_key").catch(() => null);
+  if (ownerKey && key === ownerKey) return true;
+
+  let info;
+  try {
+    info = await redis.get("vangioi_license:" + key);
+  } catch (e) {
+    return false;
+  }
+  if (!info) return false;
+  if (typeof info === "string") { try { info = JSON.parse(info); } catch (e) { return false; } }
+  return new Date(info.expires).getTime() > Date.now();
 }
 
 // Tách text nhiều dòng "acc=user:pass" thành { accounts: {user:pass}, extraLines: [] }
@@ -69,6 +86,9 @@ async function buildConfigText() {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
+    const lic = await checkLicense(req.query.key);
+    if (!lic) return res.status(403).json({ ok: false, error: "Key không hợp lệ" });
+
     let updatedAt;
     try {
       updatedAt = await redis.get(UPDATED_AT_KEY);
@@ -89,6 +109,9 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const config = body.config;
+
+  const lic = await checkLicense(body.key);
+  if (!lic) return res.status(403).json({ ok: false, error: "Key không hợp lệ" });
 
   if (config === undefined || config === null) {
     return res.status(400).json({ ok: false, error: "Thiếu config" });
