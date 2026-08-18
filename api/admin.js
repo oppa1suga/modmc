@@ -329,9 +329,16 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: "Không tìm thấy biến môi trường KV_REST_API_URL/KV_REST_API_TOKEN của database cũ trên Vercel." });
       }
 
+      const oldCallErrors = [];
       async function oldCall(path) {
         const r = await fetch(oldUrl + path, { headers: { Authorization: "Bearer " + oldToken } });
         const j = await r.json();
+        if (j.error) {
+          // Upstash trả lỗi (VD hết quota) thay vì "result" - PHẢI phát hiện chỗ này,
+          // không thì bị hiểu nhầm thành "key rỗng/không tồn tại" và bỏ sót âm thầm.
+          oldCallErrors.push(path + " -> " + j.error);
+          return undefined;
+        }
         return j.result;
       }
       const oldGet = (key) => oldCall("/get/" + encodeURIComponent(key));
@@ -393,6 +400,7 @@ export default async function handler(req, res) {
         if (Object.keys(track).length > 0) { await redis.hset("vangioi_chiendau_track:users", track); summary.chienDauTrack = Object.keys(track).length; }
       } catch (e) { summary.errors.push("vangioi_chiendau_track: " + e.message); }
 
+      summary.oldDbErrors = oldCallErrors; // lỗi thật từ phía Upstash cũ (VD hết quota) - khác với summary.errors (lỗi phía code/ghi vào db mới)
       return res.status(200).json({ ok: true, summary });
     }
 

@@ -269,7 +269,8 @@ function runMigrate() {
     let txt = "Xong: " + s.license + " key, " + s.iplock + " iplock, " + s.accounts + " account, "
         + s.accountMeta + " account_meta, " + s.extraLines + " extra_lines, " + s.chienDauTrack + " chien_dau_track"
         + ", owner_key=" + (s.ownerKey ? "có" : "không") + ", min_build=" + (s.minBuild ? "có" : "không") + ".";
-    if (s.errors && s.errors.length > 0) txt += " Lỗi: " + s.errors.join("; ");
+    if (s.errors && s.errors.length > 0) txt += " Lỗi ghi: " + s.errors.join("; ");
+    if (s.oldDbErrors && s.oldDbErrors.length > 0) txt += " Lỗi đọc DB cũ: " + s.oldDbErrors.join("; ");
     document.getElementById("migrateMeta").textContent = txt;
     loadKeys();
   });
