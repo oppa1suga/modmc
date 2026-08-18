@@ -42,10 +42,17 @@
 // tốn thêm lệnh Redis polling riêng - xem ghi chú ngân sách Redis trong project memory).
 
 import { getRedis } from "./_redis.js";
+import { isRateLimited } from "./_ratelimit.js";
 
 const redis = getRedis();
 
 const LEASE_TIMEOUT_MS = 12 * 60 * 1000; // 12 phút (dài hơn chu kỳ check 10 phút của mod)
+
+// Client thật chỉ gọi mỗi CHECK_INTERVAL_MS=10 phút (xem LicenseManager) - 30/phút/IP
+// đã dư sức cho nhiều người CHUNG 1 IP/router, chặn được kiểu spam tốc độ cao vô
+// hạn (endpoint này trước giờ KHÔNG có rate limit - lỗ hổng, vá 2026-08-18).
+const RATE_LIMIT_PER_MIN = 30;
+const RATE_LIMIT_WINDOW_SEC = 60;
 
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
@@ -64,6 +71,11 @@ export default async function handler(req, res) {
 
   if (!key) {
     return res.status(400).json({ valid: false, reason: "Thiếu key" });
+  }
+
+  const ip = getClientIp(req);
+  if (await isRateLimited(redis, "check", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key })) {
+    return res.status(429).json({ valid: false, reason: "Gọi quá nhanh, thử lại sau." });
   }
 
   const licenseKeyName = "vangioi_license:" + key;
@@ -131,7 +143,7 @@ export default async function handler(req, res) {
   }
 
   // === Khóa theo (IP + session), có thể "khóa cứng" 1 IP qua admin.html ===
-  const ip = getClientIp(req);
+  // (ip đã lấy ở trên cho rate limit, dùng lại luôn)
   const session = req.query.session || "";
   const lock = parseJson(lockRaw);
 
