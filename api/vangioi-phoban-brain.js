@@ -49,6 +49,15 @@ const RATE_LIMIT_WINDOW_SEC = 60;
 // quá nhiều lệnh, giải phóng ngân sách để tăng tốc polling (2026-08-18).
 const LICENSE_CACHE_MS = 30000;
 
+// Polling THÍCH ỨNG theo giai đoạn (2026-08-18) - server tự báo client "bao lâu
+// nữa gọi lại" qua field "nextPollMs" trong response, KHÔNG cần client biết tên
+// giai đoạn nào (không lộ gì thêm). Nhanh (FAST) đúng lúc cần phản ứng gấp (đang
+// tranh slot IDLE có lệnh sẵn sàng, đang chờ GUI xác nhận/đóng, vừa xong 1 lượt) -
+// chậm (SLOW) lúc chỉ đang chờ dài hạn không cần gấp (đang trong hầm chờ đánh
+// xong, hoặc IDLE mà cả 3 lệnh còn cooldown lâu).
+const FAST_POLL_MS = 200;
+const SLOW_POLL_MS = 2000;
+
 // ===== Bí mật (chỉ có trên server) =====
 const COMMANDS = [
   "ada join ɴɢụᴄᴛʜầɴ",
@@ -203,7 +212,9 @@ export default async function handler(req, res) {
     }
 
     await redis.set(sessionKey, JSON.stringify(s), "EX", SESSION_TTL_SEC).catch(() => {});
-    return res.status(200).json({ action, command: null, clickSlot, msg });
+    // team_mem hiện KHÔNG có client nào gọi (mem mode để local) - vẫn trả nextPollMs
+    // cho đồng bộ hình dạng response, phòng sau này có ai dùng lại tới.
+    return res.status(200).json({ action, command: null, clickSlot, msg, nextPollMs: FAST_POLL_MS });
   }
 
   function isFarFromHome(threshold) {
@@ -335,5 +346,35 @@ export default async function handler(req, res) {
 
   await redis.set(sessionKey, JSON.stringify(s), "EX", SESSION_TTL_SEC).catch(() => {});
 
-  return res.status(200).json({ action, command, clickSlot, msg });
+  // Tính "bao lâu nữa gọi lại" dựa trên GIAI ĐOẠN SAU CÙNG (s.phase có thể vừa
+  // chuyển ngay trong lượt này, VD IDLE -> WAIT_CONFIRM_GUI) - không lộ tên giai
+  // đoạn ra client, chỉ lộ đúng 1 con số mili-giây.
+  let nextPollMs;
+  switch (s.phase) {
+    case "IDLE": {
+      // Không có lệnh nào sẵn sàng ngay (nếu có thì switch phía trên đã bốc và
+      // chuyển phase rồi) - đợi tới đúng lúc lệnh gần nhất hết cooldown, không sớm
+      // hơn (phí request) mà cũng không trễ hơn SLOW_POLL_MS (lỡ mất mốc bốc lệnh).
+      const nearestGapMs = Math.min(...s.readyAt.map((r) => r - now));
+      nextPollMs = Math.max(FAST_POLL_MS, Math.min(SLOW_POLL_MS, nearestGapMs));
+      break;
+    }
+    // Đang chờ phản ứng gấp (GUI xác nhận xuất hiện/đóng, vừa xong 1 lượt) - cần
+    // phản hồi nhanh để tranh thời điểm.
+    case "WAIT_CONFIRM_GUI":
+    case "WAIT_GUI_CLOSE":
+    case "WAIT_AFTER_DONE":
+      nextPollMs = FAST_POLL_MS;
+      break;
+    // Đang chờ dài hạn (đợi đổi dimension vào hầm, hoặc đang trong hầm chờ đánh
+    // xong) - không cần gấp, poll thưa lại để đỡ tốn ops/giây.
+    case "WAIT_ENTER":
+    case "WAIT_RETURN":
+      nextPollMs = SLOW_POLL_MS;
+      break;
+    default:
+      nextPollMs = SLOW_POLL_MS;
+  }
+
+  return res.status(200).json({ action, command, clickSlot, msg, nextPollMs });
 }
