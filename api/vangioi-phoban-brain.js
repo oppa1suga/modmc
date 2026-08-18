@@ -57,6 +57,10 @@ const LICENSE_CACHE_MS = 30000;
 // xong, hoặc IDLE mà cả 3 lệnh còn cooldown lâu).
 const FAST_POLL_MS = 200;
 const SLOW_POLL_MS = 2000;
+// Riêng lúc IDLE mà cả 3 lệnh còn cooldown lâu (tới NOGUI_CD_MS = 30s) thì kéo
+// giãn xa hơn SLOW_POLL_MS nữa - hỏi mỗi 2s trong lúc chắc chắn còn 20-30s nữa
+// mới có lệnh sẵn sàng là phí, không giúp tranh slot nhanh hơn chút nào (2026-08-18).
+const IDLE_MAX_POLL_MS = 10000;
 
 // ===== Bí mật (chỉ có trên server) =====
 const COMMANDS = [
@@ -354,9 +358,9 @@ export default async function handler(req, res) {
     case "IDLE": {
       // Không có lệnh nào sẵn sàng ngay (nếu có thì switch phía trên đã bốc và
       // chuyển phase rồi) - đợi tới đúng lúc lệnh gần nhất hết cooldown, không sớm
-      // hơn (phí request) mà cũng không trễ hơn SLOW_POLL_MS (lỡ mất mốc bốc lệnh).
+      // hơn (phí request) mà cũng không trễ hơn IDLE_MAX_POLL_MS (lỡ mất mốc bốc lệnh).
       const nearestGapMs = Math.min(...s.readyAt.map((r) => r - now));
-      nextPollMs = Math.max(FAST_POLL_MS, Math.min(SLOW_POLL_MS, nearestGapMs));
+      nextPollMs = Math.max(FAST_POLL_MS, Math.min(IDLE_MAX_POLL_MS, nearestGapMs));
       break;
     }
     // Đang chờ phản ứng gấp (GUI xác nhận xuất hiện/đóng, vừa xong 1 lượt) - cần
@@ -366,11 +370,15 @@ export default async function handler(req, res) {
     case "WAIT_AFTER_DONE":
       nextPollMs = FAST_POLL_MS;
       break;
-    // Đang chờ dài hạn (đợi đổi dimension vào hầm, hoặc đang trong hầm chờ đánh
-    // xong) - không cần gấp, poll thưa lại để đỡ tốn ops/giây.
+    // Đang chờ đổi dimension để coi là đã vào hầm - cửa sổ ngắn (ENTER_TIMEOUT_MS
+    // chỉ 10s), cần đủ nhặt để không lỡ mốc đổi dimension trong chính 10s đó.
     case "WAIT_ENTER":
-    case "WAIT_RETURN":
       nextPollMs = SLOW_POLL_MS;
+      break;
+    // Đang ở trong hầm chờ đánh xong - trung bình 1-2 phút, có khi 3-4 phút, hỏi
+    // dồn dập vô ích - giãn ra như lúc IDLE (2026-08-18).
+    case "WAIT_RETURN":
+      nextPollMs = IDLE_MAX_POLL_MS;
       break;
     default:
       nextPollMs = SLOW_POLL_MS;
