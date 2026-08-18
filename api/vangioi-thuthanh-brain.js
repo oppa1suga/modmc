@@ -35,6 +35,16 @@ function getClientIp(req) {
   return req.socket?.remoteAddress || "unknown";
 }
 
+// Polling THÍCH ỨNG (2026-08-18, cùng cơ chế với vangioi-phoban-brain.js) - server
+// tự báo client "bao lâu nữa gọi lại" qua field "nextPollMs" trong response, KHÔNG
+// lộ tên giai đoạn. Nhanh lúc cần phản ứng (gửi lệnh, chờ GUI, vừa xong 1 lượt) -
+// chậm hơn lúc chờ đổi dimension vào ải (cửa sổ có hạn ENTER_TIMEOUT_MS, cần đủ
+// nhặt để không lỡ mốc) - chậm nhất lúc đang Ở TRONG ải chờ đánh xong (không biết
+// trước bao lâu, hỏi dồn dập mỗi 250ms vô ích, tốn ops/giây Redis Cloud).
+const FAST_POLL_MS = 250;        // giữ nguyên nhịp hiện tại cho giai đoạn cần phản ứng
+const SLOW_POLL_MS = 2000;       // WAIT_ENTER
+const LONG_WAIT_POLL_MS = 10000; // WAIT_RETURN (đang trong ải)
+
 // ===== Bí mật (chỉ có trên server) =====
 const EMERALD_SLOT = 31; // ô khối emerald trong GUI "Sảnh Thủ Thành"
 
@@ -206,5 +216,22 @@ export default async function handler(req, res) {
 
   await redis.set(sessionKey, JSON.stringify(s), "EX", SESSION_TTL_SEC).catch(() => {});
 
-  return res.status(200).json({ action, command, clickSlot, msg });
+  // Tính "bao lâu nữa gọi lại" dựa trên GIAI ĐOẠN SAU CÙNG (s.phase có thể vừa
+  // chuyển ngay trong lượt này) - không lộ tên giai đoạn, chỉ lộ 1 con số mili-giây.
+  let nextPollMs;
+  switch (s.phase) {
+    case "WAIT_ENTER":
+      nextPollMs = SLOW_POLL_MS;
+      break;
+    case "WAIT_RETURN":
+      nextPollMs = LONG_WAIT_POLL_MS;
+      break;
+    case "IDLE":
+    case "WAIT_GUI":
+    case "AFTER_DONE":
+    default:
+      nextPollMs = FAST_POLL_MS;
+  }
+
+  return res.status(200).json({ action, command, clickSlot, msg, nextPollMs });
 }
