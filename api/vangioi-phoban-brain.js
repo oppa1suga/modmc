@@ -55,7 +55,12 @@ const LICENSE_CACHE_MS = 30000;
 // tranh slot IDLE có lệnh sẵn sàng, đang chờ GUI xác nhận/đóng, vừa xong 1 lượt) -
 // chậm (SLOW) lúc chỉ đang chờ dài hạn không cần gấp (đang trong hầm chờ đánh
 // xong, hoặc IDLE mà cả 3 lệnh còn cooldown lâu).
-const FAST_POLL_MS = 200;
+// 150ms (giảm từ 200ms 2026-08-18 theo yêu cầu tranh slot nhanh hơn) - mỗi poll
+// tốn ~3 lệnh Redis (rate-limit INCR + session GET + SET) = ~20 ops/giây/người
+// đang tranh slot, an toàn tới ~4-5 người tranh CÙNG LÚC trước khi chạm trần
+// 100 ops/giây (dùng chung toàn hệ thống) của Redis Cloud free tier - xuống thấp
+// hơn nữa (VD 100ms) rủi ro chạm trần đúng lúc đang tranh slot đông người.
+const FAST_POLL_MS = 150;
 const SLOW_POLL_MS = 2000;
 // Riêng lúc IDLE mà cả 3 lệnh còn cooldown lâu (tới NOGUI_CD_MS = 30s) thì kéo
 // giãn xa hơn SLOW_POLL_MS nữa - hỏi mỗi 2s trong lúc chắc chắn còn 20-30s nữa
