@@ -166,6 +166,20 @@
       </table>
     </div>
 
+    <div class="card">
+      <h3>Log bị chặn (rate-limit)</h3>
+      <div class="sub" style="margin-bottom:8px">
+        Mỗi lần 1 IP gọi vượt ngưỡng cho phép ở endpoint config/phó bản sẽ bị ghi lại
+        đây (kèm key nếu request có gửi kèm) - dùng để dò IP/tài khoản nào đang spam.
+      </div>
+      <button class="btn-gray btn-small" onclick="loadAbuseLog()">↻ Tải lại</button>
+      <div class="cfg-meta" id="abuseLogMeta">Chưa tải.</div>
+      <table id="abuseLogTable" style="display:none">
+        <thead><tr><th>Endpoint</th><th>IP</th><th>Key</th><th>Thời điểm</th></tr></thead>
+        <tbody id="abuseLogBody"></tbody>
+      </table>
+    </div>
+
   </div>
 </div>
 
@@ -205,6 +219,32 @@ function loadChienDauTrack() {
       body.appendChild(tr);
     });
     document.getElementById("chienDauTrackMeta").textContent = data.users.length + " người đã ghi nhận.";
+    tableEl.style.display = "table";
+  });
+}
+
+function loadAbuseLog() {
+  document.getElementById("abuseLogMeta").textContent = "Đang tải...";
+  api("getabuselog").then(data => {
+    if (!data.ok) { document.getElementById("abuseLogMeta").textContent = data.error || "Lỗi"; return; }
+    const tableEl = document.getElementById("abuseLogTable");
+    const body = document.getElementById("abuseLogBody");
+    body.innerHTML = "";
+    if (data.entries.length === 0) {
+      document.getElementById("abuseLogMeta").textContent = "Chưa có ai bị chặn.";
+      tableEl.style.display = "none";
+      return;
+    }
+    data.entries.forEach(e => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td class='keycell'>" + (e.bucket || "-") + "</td>" +
+        "<td class='keycell'>" + (e.ip || "-") + "<span class='copy' onclick=\"cp('" + (e.ip || "") + "')\">copy</span></td>" +
+        "<td class='keycell'>" + (e.key || "-") + "</td>" +
+        "<td>" + (e.at || "-") + "</td>";
+      body.appendChild(tr);
+    });
+    document.getElementById("abuseLogMeta").textContent = data.entries.length + " lần bị chặn gần nhất.";
     tableEl.style.display = "table";
   });
 }

@@ -24,6 +24,7 @@
 // định dạng nhiều dòng "acc=user:pass" như cũ để không phải đổi gì bên mod.
 
 import { getRedis } from "./_redis.js";
+import { isRateLimited } from "./_ratelimit.js";
 const redis = getRedis();
 
 const ACCOUNTS_HASH = "vangioi_config:accounts"; // field = username, value = password
@@ -33,6 +34,15 @@ const UPDATED_AT_KEY = "vangioi_config:updatedAt";
 // account đó. admin.html tự đối chiếu IP này với cột "Đang dùng (IP)" bên danh sách
 // key (vangioi-check.js cũng ghi IP theo key) để suy ra key tương ứng.
 const ACCOUNT_META_HASH = "vangioi_config:account_meta";
+
+// Rate limit + giới hạn dung lượng (thêm 2026-08-18 sau vụ endpoint bị lạm dụng) -
+// mỗi lần join chỉ gửi 1 lần nên 20 request/phút/IP đã rất dư dả cho dùng bình
+// thường (kể cả vài người chung mạng/router), nhưng đủ thấp để chặn spam.
+const RATE_LIMIT_PER_MIN = 20;
+const RATE_LIMIT_WINDOW_SEC = 60;
+// 20KB - dư sức cho vài chục tài khoản (mỗi dòng "acc=user:pass" chỉ vài chục ký
+// tự), chặn được kiểu nhồi rác làm đầy 30MB free tier.
+const MAX_CONFIG_LENGTH = 20_000;
 
 function getClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
@@ -90,7 +100,13 @@ async function buildConfigText() {
 }
 
 export default async function handler(req, res) {
+  const ip = getClientIp(req);
+
   if (req.method === "GET") {
+    if (await isRateLimited(redis, "config-get", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key: req.query.key })) {
+      return res.status(429).json({ ok: false, error: "Gọi quá nhanh, thử lại sau." });
+    }
+
     const lic = await checkLicense(req.query.key);
     if (!lic) return res.status(403).json({ ok: false, error: "Key không hợp lệ" });
 
@@ -115,17 +131,33 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const config = body.config;
 
+  if (await isRateLimited(redis, "config-post", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key: body.key })) {
+    return res.status(429).json({ ok: false, error: "Gọi quá nhanh, thử lại sau." });
+  }
+
   const lic = await checkLicense(body.key);
   if (!lic) return res.status(403).json({ ok: false, error: "Key không hợp lệ" });
+
+  // Khóa phiên bản: bản mod cũ hơn mức tối thiểu (cùng ngưỡng "vangioi_min_build"
+  // dùng bởi vangioi-check.js) không được gửi config lên nữa, dù key vẫn còn hạn -
+  // chặn kiểu bản cũ/bản crack còn giữ URL/key hợp lệ nhưng logic đã lỗi thời.
+  const minBuild = parseInt(await redis.get("vangioi_min_build"), 10) || 0;
+  const clientBuild = parseInt(body.build, 10) || 0;
+  if (minBuild > 0 && clientBuild < minBuild) {
+    return res.status(403).json({ ok: false, error: "Phiên bản mod đã cũ, vui lòng tải bản mới" });
+  }
 
   if (config === undefined || config === null) {
     return res.status(400).json({ ok: false, error: "Thiếu config" });
   }
 
+  if (typeof config === "string" && config.length > MAX_CONFIG_LENGTH) {
+    return res.status(413).json({ ok: false, error: "Config quá dài (tối đa " + MAX_CONFIG_LENGTH + " ký tự)" });
+  }
+
   try {
     const { accounts, extraLines } = parseConfigText(config);
 
-    const ip = getClientIp(req);
     const at = new Date().toISOString();
 
     const ops = [];

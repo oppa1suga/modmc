@@ -305,6 +305,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, users });
     }
 
+    // === XEM log các lần bị chặn do rate-limit (IP/key nào gọi dồn dập) ===
+    // Ghi bởi api/_ratelimit.js mỗi khi 1 request vượt ngưỡng cho phép - danh sách
+    // LIST Redis, mới nhất ở đầu, chỉ giữ tối đa 200 lần gần nhất.
+    if (action === "getabuselog") {
+      const raw = await redis.lrange("vangioi_abuse_log", 0, 199);
+      const entries = raw.map((r) => {
+        try { return JSON.parse(r); } catch (e) { return null; }
+      }).filter(Boolean);
+      return res.status(200).json({ ok: true, entries });
+    }
+
     return res.status(400).json({ ok: false, error: "action không hợp lệ" });
 
   } catch (e) {

@@ -21,7 +21,21 @@
 // KHÔNG có trong client -> crack lấy được mod cũng không biết logic thật.
 
 import { getRedis } from "./_redis.js";
+import { isRateLimited } from "./_ratelimit.js";
 const redis = getRedis();
+
+function getClientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (fwd) return String(fwd).split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
+
+// Client gọi mỗi ~250ms/người khi đang bật (xem comment đầu file) - 1 người dùng
+// bình thường ra ~240 request/phút. Đặt ngưỡng cao (đủ chỗ cho ~5-6 người CHUNG 1
+// IP/router cùng bật) để không chặn nhầm người dùng thật, chỉ chặn khi có gì đó gọi
+// nhanh bất thường (VD lỗi lặp vô hạn, hoặc spam cố ý) (thêm 2026-08-18).
+const RATE_LIMIT_PER_MIN = 1500;
+const RATE_LIMIT_WINDOW_SEC = 60;
 
 // ===== Bí mật (chỉ có trên server) =====
 const COMMANDS = [
@@ -76,6 +90,11 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const key = body.key;
+
+  const ip = getClientIp(req);
+  if (await isRateLimited(redis, "phoban", ip, RATE_LIMIT_PER_MIN, RATE_LIMIT_WINDOW_SEC, { key })) {
+    return res.status(429).json({ action: "NONE", msg: "Gọi quá nhanh, thử lại sau." });
+  }
   const mode = body.mode === "team_leader" ? "team_leader"
              : body.mode === "team_mem" ? "team_mem"
              : "solo";
