@@ -10,7 +10,8 @@
 //     "guiOpen": true/false,         // màn hình hiện tại có phải GUI "Are you sure?" không
 //     "screenOpen": true/false,      // có bất kỳ màn hình nào đang mở không
 //     "pos": {"x":.., "y":.., "z":..},
-//     "dim": "minecraft:overworld"   // id dimension hiện tại
+//     "dim": "minecraft:overworld",  // id dimension hiện tại
+//     "tuSatEnabled": true/false     // công tắc riêng "kẹt lâu tự /warp spawn" (chỉ solo/team_leader)
 //   }
 //
 // Server trả về hành động cần làm (client chỉ thực thi, không biết vì sao):
@@ -56,6 +57,7 @@ const SECOND_GUI_GRACE_MS = 500; // chỉ dùng cho mode team_leader (ESC GUI 2)
 const CLICK_DELAY_MS = 500;
 const REJECT_CD_MS = 10000;
 const NOGUI_CD_MS = 30000;
+const TUSAT_RECOVERY_TIMEOUT_MS = 600000; // 10 phút - kẹt trong phó bản lâu hơn mức này (server không tự đưa ra) thì tự gửi /warp spawn (chỉ 1 lần/lượt)
 
 const SESSION_TTL_SEC = 3600;
 
@@ -132,7 +134,8 @@ export default async function handler(req, res) {
       phaseStart: now,
       guiSeenAt: null,
       posGraceStart: now,
-      escMsgSent: false
+      escMsgSent: false,
+      tuSatSent: false
     };
   }
 
@@ -141,6 +144,7 @@ export default async function handler(req, res) {
   const dim = typeof body.dim === "string" ? body.dim : "";
   const guiOpen = !!body.guiOpen;
   const screenOpen = !!body.screenOpen;
+  const tuSatEnabled = !!body.tuSatEnabled;
 
   // === team_mem: chờ GUI mời vào đội -> bấm xác nhận -> nếu server nhảy
   // thêm GUI 2 SAU KHI đã đổi dimension (đã thực sự bị kéo vào phó bản theo
@@ -276,6 +280,7 @@ export default async function handler(req, res) {
         msg = "Đã vào phó bản " + (s.runningCmd + 1) + ", đang chờ hoàn thành...";
         s.phase = "WAIT_RETURN";
         s.phaseStart = now;
+        s.tuSatSent = false;
         break;
       }
       if (now - s.phaseStart > ENTER_TIMEOUT_MS) {
@@ -299,6 +304,16 @@ export default async function handler(req, res) {
         s.runningCmd = -1;
         s.phase = "WAIT_AFTER_DONE";
         s.phaseStart = now;
+        break;
+      }
+      // Kẹt lâu không thấy đưa ra ngoài (server phó bản lỗi) -> chủ động /warp spawn
+      // để tự thoát (chỉ gửi 1 lần/lượt), KHÔNG hủy lượt (đã hoàn thành thật, chỉ là
+      // server không tự đưa ra) - giữ nguyên phase, không chuyển WAIT_AFTER_DONE.
+      if (tuSatEnabled && !s.tuSatSent && now - s.phaseStart > TUSAT_RECOVERY_TIMEOUT_MS) {
+        action = "SEND_COMMAND";
+        command = "warp spawn";
+        msg = "Kẹt trong phó bản quá lâu, tự gửi /warp spawn...";
+        s.tuSatSent = true;
       }
       break;
     }
