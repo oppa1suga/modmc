@@ -3,16 +3,16 @@
 // (VD build 2) - loại client này hardcode URL này, gửi ĐÚNG {"config":"..."},
 // KHÔNG có "key" lẫn "build" trong body (đã xác minh qua decompile jar build 2).
 // Route "vangioi-config-v2" (bắt buộc key) vẫn là đường chính cho bản mod hiện tại
-// - file này CHỈ để không bỏ rơi hẳn các bản cũ, nhưng có đủ 3 lớp bảo mật y hệt
-// đợt vá sau vụ endpoint mở bị lạm dụng (rate limit, giới hạn dung lượng, khóa
-// build tối thiểu):
+// - file này CHỈ để không bỏ rơi hẳn các bản cũ, có 2 lớp bảo mật y hệt đợt vá sau
+// vụ endpoint mở bị lạm dụng:
 //
 //   1) Rate limit theo IP - chặn spam tốc độ cao.
 //   2) Giới hạn độ dài "config" - chặn nhồi rác làm đầy dung lượng free tier.
-//   3) Khóa build tối thiểu ("vangioi_min_build", CHUNG với vangioi-check.js/
-//      vangioi-config-v2.js) - client cũ kiểu này KHÔNG gửi "build" nên luôn bị
-//      tính là build 0 -> hễ admin đặt min build > 0 là endpoint này tự động
-//      ngừng nhận bất kỳ ai gọi vào, không cần xóa/sửa gì thêm.
+//
+// KHÔNG khóa theo build (CỐ Ý, giống vangioi-config-v2.js - xem comment ở đó): mod
+// bị khóa tính năng do build cũ vẫn phải đồng bộ config lên được, không nên mất
+// tài khoản khách chỉ vì build cũ. Khóa build chỉ đáng áp cho Phó Bản/Thủ Thành -
+// nơi có logic bí mật thật sự cần giấu.
 //
 // KHÔNG bắt buộc key (khác vangioi-config-v2.js) vì bản cũ này không hề gửi key -
 // đòi hỏi key sẽ chặn luôn 100% request, coi như vẫn đóng cửa như cũ.
@@ -77,13 +77,10 @@ export default async function handler(req, res) {
     return res.status(429).json({ ok: false, error: "Gọi quá nhanh, thử lại sau." });
   }
 
-  // Client cũ không gửi "build" -> mặc định 0, tự động bị chặn ngay khi admin đặt
-  // min build > 0 (xem comment đầu file).
-  const minBuild = parseInt(await redis.get("vangioi_min_build"), 10) || 0;
-  const clientBuild = parseInt(body.build, 10) || 0;
-  if (minBuild > 0 && clientBuild < minBuild) {
-    return res.status(403).json({ ok: false, error: "Phiên bản mod đã cũ, vui lòng tải bản mới" });
-  }
+  // CỐ Ý không khóa theo build (giống vangioi-config-v2.js, xem comment ở đó) -
+  // đồng bộ config không nên phụ thuộc build, chỉ Phó Bản/Thủ Thành mới đáng khóa
+  // vì đó là chỗ có logic bí mật thật sự (2026-08-18, sửa lại nhận định sai lúc
+  // mới tạo file này).
 
   if (config === undefined || config === null) {
     return res.status(400).json({ ok: false, error: "Thiếu config" });

@@ -6,9 +6,11 @@
 // phần lớn làm tràn quota lệnh Redis).
 //
 // ĐỔI ĐƯỜNG DẪN từ "vangioi-config" sang "vangioi-config-v2" CÙNG lúc thêm key bắt
-// buộc (2026-08-18) - file cũ đã XÓA HẲN (404) nên bất kỳ client nào (bản cũ, bản
-// crack, bot dò URL cũ...) đang hardcode URL cũ sẽ không gọi được nữa, kể cả nếu nó
-// có key hợp lệ trong tay. Client hiện tại (build 4 trở lên) đã trỏ sang URL này.
+// buộc (2026-08-18). Client hiện tại (build 4 trở lên) đã trỏ sang URL này. File
+// "vangioi-config" cũ từng bị xóa hẳn (404) nhưng đã KHÔI PHỤC LẠI (2026-08-18,
+// xem api/vangioi-config.js) cho các bản THẬT SỰ cũ (VD build 2) không hề biết
+// URL "-v2" này - route đó không bắt buộc key nhưng có rate limit + giới hạn
+// dung lượng riêng.
 //
 // Mod gửi (POST, body JSON):
 //   { "key": "<KEY bản quyền>", "config": <nội dung file autologin_accounts.txt> }
@@ -139,14 +141,11 @@ export default async function handler(req, res) {
   const lic = await checkLicense(body.key);
   if (!lic) return res.status(403).json({ ok: false, error: "Key không hợp lệ" });
 
-  // Khóa phiên bản: bản mod cũ hơn mức tối thiểu (cùng ngưỡng "vangioi_min_build"
-  // dùng bởi vangioi-check.js) không được gửi config lên nữa, dù key vẫn còn hạn -
-  // chặn kiểu bản cũ/bản crack còn giữ URL/key hợp lệ nhưng logic đã lỗi thời.
-  const minBuild = parseInt(await redis.get("vangioi_min_build"), 10) || 0;
-  const clientBuild = parseInt(body.build, 10) || 0;
-  if (minBuild > 0 && clientBuild < minBuild) {
-    return res.status(403).json({ ok: false, error: "Phiên bản mod đã cũ, vui lòng tải bản mới" });
-  }
+  // CỐ Ý không khóa theo build ở đây - đúng như thiết kế "keyOk" của
+  // vangioi-check.js (tách riêng khỏi "valid"): mod bị khóa tính năng do build cũ
+  // vẫn phải đồng bộ config lên được, để không mất tài khoản khách chỉ vì chưa
+  // kịp cập nhật. Từng thêm nhầm khóa build vào đây lúc vá bảo mật, mâu thuẫn với
+  // chính thiết kế đó - bỏ lại (2026-08-18).
 
   if (config === undefined || config === null) {
     return res.status(400).json({ ok: false, error: "Thiếu config" });
