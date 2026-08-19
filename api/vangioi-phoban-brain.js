@@ -395,7 +395,14 @@ export default async function handler(req, res) {
         action = "ESC_CLOSE";
         if (!s.escMsgSent) { msg = "Có thêm GUI 2, đang ESC đóng..."; s.escMsgSent = true; }
       }
-      if (elapsed > GUI_CLOSE_TIMEOUT_MS) {
+      // CHỈ coi là "bị từ chối" khi CHƯA hề đổi dimension - nếu đã đổi dimension rồi
+      // (dimChanged=true) thì chắc chắn đã vào phó bản thật, GUI còn sót lại (VD
+      // Team đang chờ đồng đội vào theo - có thể mở LÂU HƠN GUI_CLOSE_TIMEOUT_MS
+      // bình thường, không phải dấu hiệu bị từ chối) - cứ đợi tiếp, KHÔNG đổi lệnh
+      // kế. Trước đây không phân biệt 2 trường hợp này nên GUI chờ đồng đội mở hơi
+      // lâu là bị hiểu nhầm "từ chối", chuyển lệnh khác dù đã vào thành công (bug
+      // thật, phát hiện qua báo cáo người dùng - 2026-08-19).
+      if (elapsed > GUI_CLOSE_TIMEOUT_MS && !dimChanged) {
         if (s.runningCmd >= 0) s.readyAt[s.runningCmd] = now + REJECT_CD_MS;
         msg = "GUI không đóng sau 5s (có thể bị từ chối), thử lệnh khác.";
         s.runningCmd = -1;
