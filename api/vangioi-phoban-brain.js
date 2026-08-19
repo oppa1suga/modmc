@@ -324,6 +324,18 @@ export default async function handler(req, res) {
 
   switch (s.phase) {
     case "IDLE": {
+      // Chỉ ghi nhận "nhà" khi người chơi THẬT SỰ đang ở dimension bình thường,
+      // KHÔNG PHẢI đang đứng sẵn trong "bosszone" (dimension phó bản) - trước đây
+      // cứ đứng đâu lúc bốc lệnh là lấy đó làm nhà, nên nếu lỡ đứng sẵn trong
+      // bosszone (VD dư sót từ lượt trước, hay tuSat /warp spawn client chưa kịp
+      // về), homeDim bị ghi SAI thành bosszone -> sau đó chỉ cần di chuyển trong
+      // CÙNG bosszone đủ xa (>10 khối, chuyện bình thường khi đánh boss) là bị
+      // hiểu nhầm "đã vào phó bản", không bao giờ phát hiện "đã về nhà" được nữa,
+      // kẹt vĩnh viễn tới hết TTL (bug thật, gặp 2 lần đêm 2026-08-19 khi theo
+      // dõi). Đang ở bosszone thì tạm hoãn bốc lệnh, đợi về dimension bình thường
+      // mới thử tiếp - không mất lệnh, chỉ trễ vài giây tới lần poll kế.
+      if (dim === "minecraft:bosszone") break;
+
       let pick = -1;
       for (let k = 0; k < COMMANDS.length; k++) {
         const i = (s.nextIndex + k) % COMMANDS.length;
